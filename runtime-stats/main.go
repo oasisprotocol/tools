@@ -256,7 +256,7 @@ func doQuery(cmd *cobra.Command, args []string) {
 		}
 
 		var proposerTimeout bool
-		if currentRound != blk.Header.Round {
+		if currentRound != blk.Header.Round && currentCommittee != nil {
 			// If new round, check for proposer timeout.
 			// Need to look at submitted transactions if round failure was caused by a proposer timeout.
 			rsp, err := consensus.GetTransactionsWithResults(ctx, height)

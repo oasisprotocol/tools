@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -106,6 +107,9 @@ type entityStats struct {
 	missedBackup uint64
 	// How many rounds proposer timeout was triggered while being the proposer.
 	missedProposer uint64
+
+	// Round at which the entity first joined the committee.
+	joinedAt uint64
 }
 
 func (s *stats) prepareEntitiesOutput() {
@@ -113,6 +117,7 @@ func (s *stats) prepareEntitiesOutput() {
 
 	s.entitiesHeader = []string{
 		"Entity ID",
+		"Joined at",
 		"Elected",
 		"Primary",
 		"Backup",
@@ -133,6 +138,7 @@ func (s *stats) prepareEntitiesOutput() {
 		var line []string
 		line = append(line,
 			entity.String(),
+			strconv.FormatUint(stats.joinedAt, 10),
 			strconv.FormatUint(stats.roundsElected, 10),
 			strconv.FormatUint(stats.roundsPrimary, 10),
 			strconv.FormatUint(stats.roundsBackup, 10),
@@ -243,7 +249,7 @@ func doQuery(cmd *cobra.Command, args []string) {
 
 		// Query latest roothash block and events.
 		blk, err := roothash.GetLatestBlock(ctx, &roothashAPI.RuntimeRequest{RuntimeID: runtimeID, Height: height})
-		if err == roothashAPI.ErrInvalidRuntime {
+		if errors.Is(err, roothashAPI.ErrInvalidRuntime) {
 			// Runtime not yet registered at current height.
 			continue
 		}
@@ -427,7 +433,10 @@ func doQuery(cmd *cobra.Command, args []string) {
 			for _, member := range currentCommittee.Members {
 				entity := nodeToEntity[member.PublicKey]
 				if _, ok := stats.entities[entity]; !ok {
-					stats.entities[entity] = &entityStats{}
+					// New entity.
+					stats.entities[entity] = &entityStats{
+						joinedAt: currentRound,
+					}
 				}
 
 				// Multiple records for same node in case the node has

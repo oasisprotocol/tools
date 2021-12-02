@@ -1,0 +1,24 @@
+package address
+
+import (
+	"testing"
+
+	"github.com/oasisprotocol/curve25519-voi/primitives/ed25519"
+)
+
+func TestFromPublicKey(t *testing.T) {
+	pk := ed25519.PublicKey{
+		0xba, 0xda, 0xdd, 0x1e, 0x55, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	}
+
+	addr, err := FromPublicKey(pk)
+	if err != nil {
+		t.Fatalf("FromPublicKey: %v", err)
+	}
+
+	const expectedAddr = "oasis1qryqqccycvckcxp453tflalujvlf78xymcdqw4vz"
+	if addr != expectedAddr {
+		t.Fatalf("FromPublicKey(pk): expected '%s', got '%s'", expectedAddr, addr)
+	}
+}

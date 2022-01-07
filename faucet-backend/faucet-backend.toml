@@ -1,0 +1,36 @@
+# data_dir is the base path where all of the faucet configuration data
+# and log files will live.
+data_dir = "/var/faucet-backend"
+
+# target_allowance is the target per-paratime allowance in base units
+# (Likely you want to multiply by 1000000000).
+target_allowance = "100000000000000"
+
+# max_consensus_fund_amount is the maximum amount of tokens funded to
+# consensus accounts per request, in base units (Likely you want to
+# multiply by 1000000000).
+max_consensus_fund_amount = "1000000000"
+
+# max_paratime_fund_amount is the maximum amount of tokens funded to
+# paratime accounts per request, in tokens.
+max_paratime_fund_amount = "1"
+
+# web_root is the base path where the static assets should be stored
+# and served from.
+web_root = ""
+
+# listen_addr is the faucet RESTful API endpoint address.
+listen_addr = ":8080"
+
+# tls_cert_file is the TLS certificate file.
+tls_cert_file = ""
+
+# tls_key_file is the TLS certificate key file.
+tls_key_file = ""
+
+# ReaptchaSharedSecret the reCAPTCHA V2 API shared secret for
+# use in bot prevention.
+recaptcha_shared_secret = ""
+
+# verbose_logging enables potentially spammy verbose logging.
+verbose_logging = true

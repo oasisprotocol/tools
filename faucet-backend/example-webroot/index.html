@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<body>
+
+<h2>Test Faucet</h2>
+
+<!-- This is where reCAPTCHA v2 integration would be. -->
+
+<form action="/api/v1/fund" method="POST">
+  <label for="paratime">ParaTime:</label><br>
+  <select id="paratime" name="paratime">
+    <option value="">Consensus</option>
+    <option value="emerald">Emerald</option>
+    <option value="cipher">Cipher</option>
+  </select><br>
+
+  <!-- The account could use js for validation. -->
+  <label for="account">Account:</label><br>
+  <input type="text" id="account" name="account" value=""><br>
+
+  <label for="amount">Amount:</label><br>
+  <input type="number" id="amount" name="amount" min="1" max="5"><br><br>
+
+  <input type="submit" value="Submit">
+</form>
+
+</body>
+</html>

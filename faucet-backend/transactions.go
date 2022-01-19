@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"time"
 
 	consensusSignature "github.com/oasisprotocol/oasis-core/go/common/crypto/signature"
 	consensus "github.com/oasisprotocol/oasis-core/go/consensus/api"
@@ -16,6 +17,8 @@ import (
 	"github.com/oasisprotocol/oasis-sdk/client-sdk/go/modules/consensusaccounts"
 	"github.com/oasisprotocol/oasis-sdk/client-sdk/go/types"
 )
+
+const requestTimeout = 15 * time.Second // TODO: Make configurable.
 
 // One would think that the SDK would have nice helpers for doing this,
 // since it is a common operation.  Instead pretend that we are DeFi DEX
@@ -122,7 +125,7 @@ func (svc *Service) SignAndSubmitMetaTx(
 	// that is all we use this for.  This would have been a fully
 	// generic function if it wasn't for this event nonsense.
 	decoder := conn.Runtime(pt).ConsensusAccounts
-	watchCtx, cancelFn := context.WithCancel(ctx)
+	watchCtx, cancelFn := context.WithTimeout(ctx, requestTimeout)
 	defer cancelFn()
 
 	ch, err := conn.Runtime(pt).WatchEvents(watchCtx, []client.EventDecoder{decoder}, false)
@@ -142,7 +145,6 @@ func (svc *Service) SignAndSubmitMetaTx(
 		for {
 			var bev *client.BlockEvents
 			select {
-			// TODO: Timeout.
 			case <-watchCtx.Done():
 				return
 			case bev = <-ch:
@@ -180,7 +182,7 @@ func (svc *Service) SignAndSubmitMetaTx(
 	// WARNING: Likewise this is specialized to deposit transactions.
 	ev := <-resultCh
 	if ev == nil {
-		svc.log.Printf("tx/meta: failed to wait for event")
+		svc.log.Printf("tx/meta: failed to wait for event: %v", watchCtx.Err())
 		return fmt.Errorf("failed to wait for event")
 	}
 	if !ev.IsSuccess() {

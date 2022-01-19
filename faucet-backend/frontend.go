@@ -242,7 +242,16 @@ func (svc *Service) OnFundRequest(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Attempt to fund the address.
-	svc.fundRequestCh <- fundReq
+	select {
+	case svc.fundRequestCh <- fundReq:
+	default:
+		// Queue backlog full, fail early.
+		writeResult(
+			http.StatusInternalServerError,
+			fmt.Errorf("temporary failure, try again later"),
+		)
+		return
+	}
 
 	// Return the status.
 	if err = <-fundReq.ResponseCh; err != nil {

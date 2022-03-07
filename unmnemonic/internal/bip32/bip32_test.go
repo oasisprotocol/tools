@@ -6,7 +6,7 @@ import (
 
 	"github.com/oasisprotocol/curve25519-voi/primitives/ed25519"
 
-	"github.com/oasisprotocol/tools/unledger/internal/bip39"
+	"github.com/oasisprotocol/tools/unmnemonic/internal/bip39"
 )
 
 func TestKnownAnswer(t *testing.T) {

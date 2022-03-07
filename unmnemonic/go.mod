@@ -1,4 +1,4 @@
-module github.com/oasisprotocol/tools/unledger
+module github.com/oasisprotocol/tools/unmnemonic
 
 go 1.17
 

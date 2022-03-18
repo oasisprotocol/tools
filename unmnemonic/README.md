@@ -1,7 +1,12 @@
-# unledger
+# unmnemonic
 
-This tool implements wallet key deriviation from a BIP-39 mnemonic in a
-fashion that is compatible with the old pre-SLIP Oasis Ledger application.
+This tool implements wallet key derivation from a BIP-39 mnemonic using
+the various algorithms that are or have been used by Oasis.
+
+The currently supported methods are:
+
+- ADR-0008 SLIP-0010
+- Legacy pre-SLIP Oasis Ledger
 
 It is intended to be used for the purposes of migration and/or disaster
 recovery.  Use of this tool can lead to the total compromise of all accounts

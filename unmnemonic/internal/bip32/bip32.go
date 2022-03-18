@@ -15,7 +15,7 @@ import (
 	"github.com/oasisprotocol/curve25519-voi/curve/scalar"
 	"github.com/oasisprotocol/curve25519-voi/primitives/ed25519"
 
-	"github.com/oasisprotocol/tools/unledger/internal/slip10"
+	"github.com/oasisprotocol/tools/unmnemonic/internal/slip10"
 )
 
 const (
@@ -192,10 +192,15 @@ func NewRoot(seed []byte) (*Node, error) {
 	// BIP32-Ed25519: If the third highest bit of the last byte of kL is
 	// not zero, discard k.
 	for {
-		n.kL, n.kR, err = slip10.NewMasterKey(sTmp)
-		if err != nil {
+		var (
+			kL *slip10.Secret
+			kR *slip10.ChainCode
+		)
+		if kL, kR, err = slip10.NewMasterKey(sTmp); err != nil {
 			return nil, err
 		}
+		copy(n.kL[:], kL[:])
+		copy(n.kR[:], kR[:])
 
 		if n.kL[31]&0x20 != 0x20 { // ~0b00100000
 			break

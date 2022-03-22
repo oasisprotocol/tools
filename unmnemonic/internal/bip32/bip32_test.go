@@ -10,6 +10,46 @@ import (
 )
 
 func TestKnownAnswer(t *testing.T) {
+	t.Run("Paper", testKnownAnswerPaper)
+	t.Run("Ledger", testKnownAnswerLedger)
+}
+
+func testKnownAnswerPaper(t *testing.T) {
+	// Finding test vectors for this is really hard for some reason.
+	//
+	// Taken from: https://github.com/islishude/bip32/blob/master/xprv_test.go
+
+	mustUnhex := func(s string) [32]byte {
+		b, err := hex.DecodeString(s)
+		if err != nil {
+			t.Fatalf("hex.DecodeString(%v): %v", s, err)
+		}
+		var arr [32]byte
+		copy(arr[:], b)
+		return arr
+	}
+	n := Node{
+		kL:     mustUnhex("80660d61ec16a6ca93e05e1738082dff22a422f00e95a5dfa9d91a74fab4725a"),
+		kR:     mustUnhex("017255017df26d8ff29dbe315c838cd3837a311e611a9dd1c8c8a82a21ad2ec3"),
+		c:      mustUnhex("14828443112319ee3ee64c82cda51c0f0df3c9550994bf70b4383d234e6e8ffd"),
+		isRoot: true,
+	}
+
+	child, err := n.DeriveChild(1)
+	if err != nil {
+		t.Fatalf("DeriveChild(1): %v", err)
+	}
+	assertNodeEqualsHex(
+		t,
+		"c02210e035578f15b48ad54d90d59a88352d3160f36d0458b3e1583302b5725a",
+		"435748df6415038a8fe35c46779fea8554b747a9093a8f784cf079144fc00317",
+		"594479b4ed8519d7c4378a9d7c782029f61d4ec107900b8dfb70c7d609ad5a16",
+		child,
+	)
+	debugDumpNode(t, "child-1", child)
+}
+
+func testKnownAnswerLedger(t *testing.T) {
 	// All values taken from the python code I was told implements what
 	// a real ledger device will.
 	//
@@ -30,9 +70,9 @@ func TestKnownAnswer(t *testing.T) {
 	)
 
 	// Derive the root node
-	root, err := NewRoot(seed)
+	root, err := NewLedgerRoot(seed)
 	if err != nil {
-		t.Fatalf("NewRoot: %v", err)
+		t.Fatalf("NewLedgerRoot: %v", err)
 	}
 	assertNodeEqualsHex(
 		t,
@@ -128,7 +168,7 @@ func TestKnownAnswer(t *testing.T) {
 		)
 		debugDumpNode(t, "child-oneshot", child)
 
-		privKey := child.GetOasisPrivateKey()
+		privKey := child.GetLedgerPrivateKey()
 		pubKey := (privKey.Public()).(ed25519.PublicKey)
 		assertBytesEqualsHex(
 			t,

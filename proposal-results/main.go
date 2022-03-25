@@ -2,18 +2,17 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"math/big"
-	"net/http"
 	"os"
 	"sort"
 	"strconv"
 
+	metadata "github.com/oasisprotocol/metadata-registry-tools"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 
+	"github.com/oasisprotocol/oasis-core/go/common/crypto/signature"
 	"github.com/oasisprotocol/oasis-core/go/common/quantity"
 	consensus "github.com/oasisprotocol/oasis-core/go/consensus/api"
 	governance "github.com/oasisprotocol/oasis-core/go/governance/api"
@@ -24,8 +23,8 @@ import (
 )
 
 var queryCmd = &cobra.Command{
-	Use:   "<runtime-id>",
-	Short: "query runtime blocks",
+	Use:   "<proposal-id>",
+	Short: "proposal id",
 	Run:   doQuery,
 }
 
@@ -49,51 +48,47 @@ func doConnect(cmd *cobra.Command) *grpc.ClientConn {
 	return conn
 }
 
-type oScanResponse struct {
-	Data *oScanData `json:"data"`
+type EntityMeta struct {
+	EntityID signature.PublicKey
+	Name     string
 }
 
-type oScanData struct {
-	List []*oScanVal `json:"list"`
+func (e *EntityMeta) Address() staking.Address {
+	return staking.NewAddress(e.EntityID)
 }
 
-type oScanVal struct {
-	Rank          uint64          `json:"rank"`
-	EntityID      string          `json:"entityId"`
-	EntityAddress staking.Address `json:"entityAddress"`
-	NodeID        string          `json:"nodeId"`
-	Name          string          `json:"name"`
+func getMetadataRegistryMeta(ctx context.Context) (map[staking.Address]*EntityMeta, error) {
+	gp, err := metadata.NewGitProvider(metadata.NewGitConfig())
+	if err != nil {
+		return nil, err
+	}
+
+	entities, err := gp.GetEntities(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	meta := make(map[staking.Address]*EntityMeta, len(entities))
+	for id, ent := range entities {
+		em := &EntityMeta{
+			EntityID: id,
+			Name:     ent.Name,
+		}
+		meta[em.Address()] = em
+	}
+
+	return meta, nil
 }
 
-func getOasisscanValidators(ctx context.Context) []*oScanVal {
-	req, err := http.NewRequestWithContext(ctx, "GET", "https://www.oasisscan.com/mainnet/validator/list", nil)
-	if err != nil {
-		cmdCommon.EarlyLogAndExit(err)
+func name(registry *EntityMeta, oscan *EntityMeta) string {
+	// Prefer registry meta.
+	if registry != nil {
+		return registry.Name + " (from metadata registry)"
 	}
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		cmdCommon.EarlyLogAndExit(err)
+	if oscan != nil && oscan.Name != "" {
+		return oscan.Name + " (from oasisscan)"
 	}
-	if resp.StatusCode != http.StatusOK {
-		cmdCommon.EarlyLogAndExit(fmt.Errorf("invalid response status: %d", resp.StatusCode))
-	}
-	if resp == nil {
-		cmdCommon.EarlyLogAndExit(fmt.Errorf("no response"))
-	}
-	if resp != nil {
-		defer resp.Body.Close()
-	}
-	vals, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		cmdCommon.EarlyLogAndExit(fmt.Errorf("failed to read response body: %w", err))
-	}
-	var oResp oScanResponse
-	if err = json.Unmarshal(vals, &oResp); err != nil {
-		cmdCommon.EarlyLogAndExit(err)
-	}
-
-	return oResp.Data.List
+	return "<none>"
 }
 
 func sortByStake(keyvals map[staking.Address]quantity.Quantity) KeyVals {
@@ -156,10 +151,15 @@ func doQuery(cmd *cobra.Command, args []string) {
 		currentValidators, err := sched.GetValidators(ctx, latestHeight)
 		exitErr(err)
 
-		oasisScanVals := make(map[staking.Address]*oScanVal)
-		for _, vals := range getOasisscanValidators(ctx) {
-			val := vals
-			oasisScanVals[val.EntityAddress] = val
+		oasisScanMeta, err := getOasisscanMeta(ctx)
+		if err != nil {
+			oasisScanMeta = make(map[staking.Address]*EntityMeta)
+			fmt.Errorf("error loading oasiscan meta: %w", err)
+		}
+		registryMeta, err := getMetadataRegistryMeta(ctx)
+		if err != nil {
+			registryMeta = make(map[staking.Address]*EntityMeta)
+			fmt.Errorf("error loading metadata-registry meta: %w", err)
 		}
 
 		voters := make(map[staking.Address]quantity.Quantity)
@@ -240,13 +240,7 @@ func doQuery(cmd *cobra.Command, args []string) {
 		fmt.Println("\nValidators voted:")
 		votersList := sortByStake(voters)
 		for _, val := range votersList {
-			name := "<none>"
-			v := oasisScanVals[val.Key]
-			if v != nil {
-				if v.Name != "" {
-					name = v.Name
-				}
-			}
+			name := name(registryMeta[val.Key], oasisScanMeta[val.Key])
 			stakePercentage := new(big.Float).SetInt(val.Value.Clone().ToBigInt())
 			stakePercentage = stakePercentage.Mul(stakePercentage, new(big.Float).SetInt64(100))
 			stakePercentage = stakePercentage.Quo(stakePercentage, new(big.Float).SetInt(totalVotingStake.ToBigInt()))
@@ -255,13 +249,7 @@ func doQuery(cmd *cobra.Command, args []string) {
 		fmt.Println("\nValidators not voted:")
 		nonVotersList := sortByStake(nonVoters)
 		for _, val := range nonVotersList {
-			name := "<none>"
-			v := oasisScanVals[val.Key]
-			if v != nil {
-				if v.Name != "" {
-					name = v.Name
-				}
-			}
+			name := name(registryMeta[val.Key], oasisScanMeta[val.Key])
 			stakePercentage := new(big.Float).SetInt(val.Value.Clone().ToBigInt())
 			stakePercentage = stakePercentage.Mul(stakePercentage, new(big.Float).SetInt64(100))
 			stakePercentage = stakePercentage.Quo(stakePercentage, new(big.Float).SetInt(totalVotingStake.ToBigInt()))

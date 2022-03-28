@@ -112,6 +112,9 @@ func doQuery(cmd *cobra.Command, args []string) {
 
 	// Entities running latest version
 	gp, err := metadataRegistry.NewGitProvider(metadataRegistry.NewGitConfig())
+	if err != nil {
+		cmdCommon.EarlyLogAndExit(err)
+	}
 
 	latestVersion := versionKeys[len(versionKeys)-1]
 	updatedEntities := make([]string, 0)

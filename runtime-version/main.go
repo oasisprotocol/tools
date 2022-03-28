@@ -79,7 +79,7 @@ func doQuery(cmd *cobra.Command, args []string) {
 		cmdCommon.EarlyLogAndExit(err)
 	}
 
-	entityVersions := make(map[signature.PublicKey]string)
+	entityVersions := make(map[signature.PublicKey]map[string]bool)
 	versionCounts := make(map[string]int)
 	totalNodes := 0
 
@@ -90,8 +90,11 @@ func doQuery(cmd *cobra.Command, args []string) {
 				versionCounts[versionString] = versionCounts[versionString] + 1
 				totalNodes += 1
 
-				// todo: broken if an entity has multiple nodes running different versions
-				entityVersions[node.EntityID] = versionString
+				// Store runtime version info for current entity.
+				if _, ok := entityVersions[node.EntityID]; !ok {
+					entityVersions[node.EntityID] = make(map[string]bool)
+				}
+				entityVersions[node.EntityID][versionString] = true
 			}
 		}
 	}
@@ -112,8 +115,8 @@ func doQuery(cmd *cobra.Command, args []string) {
 
 	latestVersion := versionKeys[len(versionKeys)-1]
 	updatedEntities := make([]string, 0)
-	for entity, version := range entityVersions {
-		if version == latestVersion {
+	for entity, versions := range entityVersions {
+		if versions[latestVersion] {
 			name := "<none>"
 			meta, err := gp.GetEntity(ctx, entity)
 			if err == nil {

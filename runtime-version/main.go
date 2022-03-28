@@ -6,6 +6,8 @@ import (
 	"sort"
 
 	"github.com/spf13/cobra"
+	flag "github.com/spf13/pflag"
+	"github.com/spf13/viper"
 	"google.golang.org/grpc"
 
 	"github.com/oasisprotocol/oasis-core/go/common"
@@ -21,12 +23,18 @@ import (
 	metadataRegistry "github.com/oasisprotocol/metadata-registry-tools"
 )
 
-var queryCmd = &cobra.Command{
-	Use:   "<runtime-id>",
-	Short: "query runtime versions",
-	Run:   doQuery,
-}
+// CfgHeight configures the consensus height.
+const cfgHeight = "height"
 
+var (
+	queryCmdFlags = flag.NewFlagSet("", flag.ContinueOnError)
+
+	queryCmd = &cobra.Command{
+		Use:   "<runtime-id>",
+		Short: "query runtime versions",
+		Run:   doQuery,
+	}
+)
 var runtimeID common.Namespace
 
 func doConnect(cmd *cobra.Command) *grpc.ClientConn {
@@ -55,6 +63,8 @@ func doQuery(cmd *cobra.Command, args []string) {
 	}
 	doc.SetChainContext()
 
+	height := viper.GetInt64(cfgHeight)
+
 	if len(args) != 1 {
 		cmdCommon.EarlyLogAndExit(fmt.Errorf("need exactly one argument (runtimeID)"))
 	}
@@ -66,12 +76,14 @@ func doQuery(cmd *cobra.Command, args []string) {
 	consensus := consensusAPI.NewConsensusClient(conn)
 	reg := registryAPI.NewRegistryClient(conn)
 
-	// Take height from latest block
-	blk, err := consensus.GetBlock(ctx, consensusAPI.HeightLatest)
-	if err != nil {
-		cmdCommon.EarlyLogAndExit(err)
+	// If height is latest height, take height from latest block.
+	if height == consensusAPI.HeightLatest {
+		blk, err := consensus.GetBlock(ctx, consensusAPI.HeightLatest)
+		if err != nil {
+			cmdCommon.EarlyLogAndExit(err)
+		}
+		height = blk.Height
 	}
-	height := blk.Height
 
 	// Get nodes
 	nodes, err := reg.GetNodes(ctx, height)
@@ -99,8 +111,10 @@ func doQuery(cmd *cobra.Command, args []string) {
 		}
 	}
 
+	fmt.Printf("Runtime version stats for height: %d\n", height)
+
 	// Node version stats
-	fmt.Println("Total nodes:", totalNodes)
+	fmt.Println("\nTotal nodes:", totalNodes)
 	versionKeys := make([]string, 0, len(versionCounts))
 	for key, _ := range versionCounts {
 		versionKeys = append(versionKeys, key)
@@ -145,4 +159,11 @@ func main() {
 func init() {
 	queryCmd.PersistentFlags().AddFlagSet(cmdGrpc.ClientFlags)
 	queryCmd.PersistentFlags().AddFlagSet(cmdCommonFlags.GenesisFileFlags)
+	queryCmdFlags.Int64(
+		cfgHeight,
+		consensusAPI.HeightLatest,
+		fmt.Sprintf("height at which to query for info (default %d, i.e. latest height)", consensusAPI.HeightLatest),
+	)
+	_ = viper.BindPFlags(queryCmdFlags)
+	queryCmd.Flags().AddFlagSet(queryCmdFlags)
 }

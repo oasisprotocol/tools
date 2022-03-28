@@ -83,7 +83,7 @@ func getMetadataRegistryMeta(ctx context.Context) (map[staking.Address]*EntityMe
 func name(registry *EntityMeta, oscan *EntityMeta) string {
 	// Prefer registry meta.
 	if registry != nil {
-		return registry.Name + " (from metadata registry)"
+		return registry.Name
 	}
 	if oscan != nil && oscan.Name != "" {
 		return oscan.Name + " (from oasisscan)"

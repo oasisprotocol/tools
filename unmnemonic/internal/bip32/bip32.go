@@ -41,7 +41,8 @@ type Node struct {
 	kR [32]byte
 	c  [32]byte
 
-	isRoot bool
+	isRoot   bool
+	isBitpie bool
 }
 
 // GetLedgerPrivateKey returns the Oasis network private key associated
@@ -64,6 +65,10 @@ func (n *Node) GetExtendedPrivateKey() []byte {
 
 // DeriveChild derives a sub-key with the provided index.
 func (n *Node) DeriveChild(idx uint32) (*Node, error) {
+	if n.isBitpie {
+		return n.deriveBitpieChild(idx)
+	}
+
 	// BIP32-Ed25519 is a steaming pile of shit, and really shouldn't be
 	// used at all, which is why we don't use it.  Unfortunately legacy
 	// applications exist.

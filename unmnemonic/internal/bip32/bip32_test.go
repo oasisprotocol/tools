@@ -12,6 +12,8 @@ import (
 func TestKnownAnswer(t *testing.T) {
 	t.Run("Paper", testKnownAnswerPaper)
 	t.Run("Ledger", testKnownAnswerLedger)
+	t.Run("Bitpie/Consistency", testKnownAnswerBitpieConsistency)
+	t.Run("Bitpie", testKnownAnswerBitpie)
 }
 
 func testKnownAnswerPaper(t *testing.T) {
@@ -19,19 +21,10 @@ func testKnownAnswerPaper(t *testing.T) {
 	//
 	// Taken from: https://github.com/islishude/bip32/blob/master/xprv_test.go
 
-	mustUnhex := func(s string) [32]byte {
-		b, err := hex.DecodeString(s)
-		if err != nil {
-			t.Fatalf("hex.DecodeString(%v): %v", s, err)
-		}
-		var arr [32]byte
-		copy(arr[:], b)
-		return arr
-	}
 	n := Node{
-		kL:     mustUnhex("80660d61ec16a6ca93e05e1738082dff22a422f00e95a5dfa9d91a74fab4725a"),
-		kR:     mustUnhex("017255017df26d8ff29dbe315c838cd3837a311e611a9dd1c8c8a82a21ad2ec3"),
-		c:      mustUnhex("14828443112319ee3ee64c82cda51c0f0df3c9550994bf70b4383d234e6e8ffd"),
+		kL:     mustUnhex(t, "80660d61ec16a6ca93e05e1738082dff22a422f00e95a5dfa9d91a74fab4725a"),
+		kR:     mustUnhex(t, "017255017df26d8ff29dbe315c838cd3837a311e611a9dd1c8c8a82a21ad2ec3"),
+		c:      mustUnhex(t, "14828443112319ee3ee64c82cda51c0f0df3c9550994bf70b4383d234e6e8ffd"),
 		isRoot: true,
 	}
 
@@ -209,4 +202,14 @@ func assertNodeEqualsHex(t *testing.T, expectedKl, expectedKr, expectedC string,
 
 func debugDumpNode(t *testing.T, descr string, n *Node) {
 	t.Logf("Node(%s):\nkL: %02x\nkR: %02x\nc: %02x", descr, n.kL[:], n.kR[:], n.c[:])
+}
+
+func mustUnhex(t * testing.T, s string) [32]byte {
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		t.Fatalf("hex.DecodeString(%v): %v", s, err)
+	}
+	var arr [32]byte
+	copy(arr[:], b)
+	return arr
 }

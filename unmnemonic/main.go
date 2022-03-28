@@ -185,7 +185,7 @@ func doInteractive() error {
 }
 
 func deriveLedger(seed []byte, indexes []uint32) ([]*walletInfo, error) {
-	root, err := bip32.NewRoot(seed)
+	root, err := bip32.NewLedgerRoot(seed)
 	if err != nil {
 		return nil, fmt.Errorf("failed to derive BIP32-Ed25519 root: %w", err)
 	}
@@ -200,7 +200,7 @@ func deriveLedger(seed []byte, indexes []uint32) ([]*walletInfo, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to derive key for index %d: %w", index, err)
 		}
-		privateKey := child.GetOasisPrivateKey()
+		privateKey := child.GetLedgerPrivateKey()
 		address, err := address.FromPublicKey(privateKey.Public())
 		if err != nil {
 			return nil, fmt.Errorf("failed to derive address for index %d: %w", index, err)

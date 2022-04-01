@@ -214,7 +214,7 @@ func doQuery(cmd *cobra.Command, args []string) {
 		exitErr(err)
 
 		// Try closing the proposal.
-		err = p.CloseProposal(*totalVotingStake.Clone(), params.Quorum, params.Threshold)
+		err = p.CloseProposal(*totalVotingStake.Clone(), params.StakeThreshold)
 		exitErr(err)
 
 		fmt.Println("Proposal active, vote outcome if ended now:", p.State)
@@ -227,7 +227,7 @@ func doQuery(cmd *cobra.Command, args []string) {
 		voteStakePercentage := new(big.Float).SetInt(votedStake.Clone().ToBigInt())
 		voteStakePercentage = voteStakePercentage.Mul(voteStakePercentage, new(big.Float).SetInt64(100))
 		voteStakePercentage = voteStakePercentage.Quo(voteStakePercentage, new(big.Float).SetInt(totalVotingStake.ToBigInt()))
-		fmt.Printf("\nVoted stake: %s (%.2f%%), total voting stake: %s, quorum: %d%%\n", votedStake, voteStakePercentage, totalVotingStake, params.Quorum)
+		fmt.Printf("\nVoted stake: %s (%.2f%%), total voting stake: %s\n", votedStake, voteStakePercentage, totalVotingStake)
 
 		votedYes := p.Results[governance.VoteYes]
 		votedYesPercentage := new(big.Float).SetInt(votedYes.Clone().ToBigInt())
@@ -235,7 +235,7 @@ func doQuery(cmd *cobra.Command, args []string) {
 		if votedStake.Cmp(quantity.NewFromUint64(0)) > 0 {
 			votedYesPercentage = votedYesPercentage.Quo(votedYesPercentage, new(big.Float).SetInt(votedStake.ToBigInt()))
 		}
-		fmt.Printf("Voted yes stake: %s (%.2f%%), voted stake: %s, threshold: %d%%\n", votedYes, votedYesPercentage, votedStake, params.Threshold)
+		fmt.Printf("Voted yes stake: %s (%.2f%%), voted stake: %s, threshold: %d%%\n", votedYes, votedYesPercentage, votedStake, params.StakeThreshold)
 
 		fmt.Println("\nValidators voted:")
 		votersList := sortByStake(voters)

@@ -1,0 +1,71 @@
+# Runtime Version
+
+Tool for dumping runtime version stats.
+
+## Build
+
+```
+go build
+```
+
+## Run
+
+```
+./runtime-version <runtime-id> --address <path-to-node-internal.sock>  --genesis.file <path-to-genesis-json>
+```
+
+An example run for Emerald Mainnet:
+
+```
+$ ./runtime-version 000000000000000000000000000000000000000000000000e2eaa99fc008f87f --genesis.file ./oasis-mainnet/genesis.json
+Total nodes: 62
+6.0.0: 1
+6.1.0: 12
+6.2.0: 49
+
+Total entities running 6.2.0: 44
+oasis1qp334gzlzrap6k2ch6wc9vxxplw9sg3v9cfvvgsy Alive29
+oasis1qp4f47plgld98n5g2ltalalnndnzz96euv9n89lz Julia-Ju
+oasis1qp53ud2pcmm73mlf4qywnrr245222mvlz5a2e5ty SerGo
+oasis1qp6fzgx9zhamsk6c77cwzjeme06xwswffvhk6js2 Making.Cash Validator
+oasis1qp9xlxurlcx3k5h3pkays56mp48zfv9nmcf982kn MARSOHOT
+oasis1qpaygvzwd5ffh2f5p4qdqylymgqcvl7sp5gxyrl3 Appload
+oasis1qppctxzn8djkqfvrxugak9v7dp25vddq7sxqhkry Tuzem
+oasis1qpqz8g88kvw49m402k8m2r6nv4p62vsdkv5d0u6r Dobrynya Hukutu4
+oasis1qps9drw07z0gmh5z2pn7zwl3z53ate2yvqf3uzq5 cherkes
+oasis1qpwrq93z8s9ytu2hfjtqggc9edgwfadzevs3trvm Munay Network
+oasis1qpxpnxxk4qcgl7n55tx0yuqmrcw5cy2u5vzjq5u4 Perfect Stake
+oasis1qq0xmq7r0z9sdv02t5j9zs7en3n6574gtg8v9fyt Oasis Community Mars
+oasis1qq2kqzr4q942x44st97n66nmmyh7dhsuvsqyc22u Aptemuyc🌹
+oasis1qq3fq8hxrlq6pedw0q3f57daea43a6v7q5rwf0ll Maria Mirabella❤️ ROSE
+oasis1qq4f2h225gv6g8w8w23fm740aze9lke4qun72n59 gunray
+oasis1qqewwznmvwfvee0dyq9g48acy0wcw890g549pukz Wanderer Staking
+oasis1qql4alk30frfa6xua42eu7tynkqf9vd5ug95yqpn Breathe and Stake
+oasis1qqr8y5cez0aczdlnfp9fre82whjsdgqgd5xxtv6p BroMyb
+oasis1qqrv4g5wu543wa7fcae76eucqfn2uc77zgqw8fxk Lusia
+oasis1qqw05utlqvf2ska0fyjf5yr7peg2z4tuxcjmqztp RedHead
+oasis1qqx820g2geqzeyeyfnm5hgz72eaj9emajgqmscy0 max999
+oasis1qqxqhx9t52rsevhhtfspdxp4gsaft6ewyyeqnqy3 LDV
+oasis1qr0jwz65c29l044a204e3cllvumdg8cmsgt2k3ql Staking Fund
+oasis1qr8al5vcpqzjspdl8yt27fqc3pydz4alhs0xqp5e <none>
+oasis1qr9zuf3n8g3znm786st3sldfw677pk3a6v85w9ds glebanyy
+oasis1qram2p9w3yxm4px5nth8n7ugggk5rr6ay5d284at <none>
+oasis1qrdx0n7lgheek24t24vejdks9uqmfldtmgdv7jzz Bit Cat🐱
+oasis1qrmexg6kh67xvnp7k42sx482nja5760stcrcdkhm ushakov
+oasis1qrs8zlh0mj37ug0jzlcykz808ylw93xwkvknm7yc Bitoven
+oasis1qrugz89g5esmhs0ezer0plsfvmcgctge35n32vmr Validatrium
+oasis1qz0ea28d8p4xk8xztems60wq22f9pm2yyyd82tmt Simply Staking
+oasis1qz22xm9vyg0uqxncc667m4j4p5mrsj455c743lfn S5
+oasis1qz26ty8q6gwt6zah7dtt8jpepvwnttkg8ssnxjl7 <none>
+oasis1qz72lvk2jchk0fjrz7u2swpazj3t5p0edsdv7sf8 Ocean Stake
+oasis1qz8vfnkcc48grazt83gstfm6yjwyptalny8cywtp <none>
+oasis1qzf03q57jdgdwp2w7y6a8yww6mak9khuag9qt0kd Spectrum Staking
+oasis1qzk6qlmgnq40cq2n3jfkw3307feqngt4gvksfml6 GateOmega
+oasis1qzl99wft8jtt7ppprk7ce7s079z3r3t77s6pf3dd DCC Capital
+oasis1qzmwdlxy7cltmwt99u9pwqt3g0rdwgsqyvcqymmt alexandr0
+oasis1qzp84num6xgspdst65yv7yqegln6ndcxmuuq8s9w ZJU_AIF
+oasis1qzrehfnnntdaeshy5f6kfa8v3p35yu7mluaapmgc University of Malta - Centre for DLT
+oasis1qzt4fvcc6cw9af69tek9p3mfjwn3a5e5vcyrw7ac StakeService
+oasis1qzugextrcdueshq63w7l9x4xglnusznsgqa95w7e Alexander (aka Bambarello) Validator
+oasis1qzzytegg6jc7hxu6y8feuzkgmr75ms7hc54mz85p Doorgod
+```

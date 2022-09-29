@@ -11,7 +11,7 @@ sudo apt update && sudo apt upgrade -y
 ```
 sudo apt install make clang pkg-config libssl-dev build-essential git ncdu bsdmainutils -y < "/dev/null"
 ```
-You can also add other libraries here. For example; jg, screen, curl etc.
+You can also add other libraries here. For example; jq, screen, curl etc.
 
 ## Go setup
 ```

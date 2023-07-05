@@ -6,8 +6,6 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/oasisprotocol/curve25519-voi/curve"
-	"github.com/oasisprotocol/curve25519-voi/curve/scalar"
 	"github.com/oasisprotocol/curve25519-voi/primitives/ed25519"
 	"github.com/tyler-smith/go-bip32"
 )
@@ -17,7 +15,7 @@ func (n *Node) deriveBitpieChild(idx uint32) (*Node, error) {
 		return nil, fmt.Errorf("bip32: bitpie derivation is non-hardened only")
 	}
 
-	aBytes, err := bitpieScalarToPublicKey(n.kL[:])
+	aBytes, err := bitpieSeedToPublicKey(n.kL[:])
 	if err != nil {
 		return nil, err
 	}
@@ -58,23 +56,23 @@ func (n *Node) deriveBitpieChild(idx uint32) (*Node, error) {
 	return childNode, nil
 }
 
-func bitpieScalarToPublicKey(rawScalar []byte) (ed25519.PublicKey, error) {
-	if l := len(rawScalar); l != scalar.ScalarSize {
-		return nil, fmt.Errorf("bip32: invalid scalar lenght: %v", l)
-	}
+func bitpieSeedToPublicKey(seed []byte) (ed25519.PublicKey, error) {
+	// bitpie claims:
+	//
+	// EdPublicKey XPub() {
+	//   byte[] scalar = new byte[32];
+	//   System.arraycopy(toBytes(),0,scalar,0,32);
+	//   GroupElement point = ED_25519_CURVE_SPEC.getB().scalarMultiply(scalar);
+	//   byte[] buf = point.toByteArray();
+	//   byte[] xpub = new byte[64];
+	//   System.arraycopy(buf,0,xpub,0,32);
+	//   System.arraycopy(toBytes(),32,xpub,32,32);
+	//   return new EdPublicKey(xpub);
+	// }
 
-	var s scalar.Scalar
-	if _, err := s.SetBytesModOrder(rawScalar); err != nil {
-		return nil, fmt.Errorf("bip32: failed to deserialize scalar: %w", err)
-	}
-
-	var (
-		A           curve.EdwardsPoint
-		aCompressed curve.CompressedEdwardsY
-	)
-	aCompressed.SetEdwardsPoint(A.MulBasepoint(curve.ED25519_BASEPOINT_TABLE, &s))
-
-	return ed25519.PublicKey(aCompressed[:]), nil
+	// What really happens is:
+	priv := ed25519.NewKeyFromSeed(seed)
+	return priv.Public().(ed25519.PublicKey), nil
 }
 
 func NewBitpieRoot(seed []byte) (*Node, error) {

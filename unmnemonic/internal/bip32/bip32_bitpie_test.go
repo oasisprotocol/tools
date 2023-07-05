@@ -41,7 +41,7 @@ func testKnownAnswerBitpie(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeriveChild(0) (m/0): %v", err)
 	}
-	pk, err := ScalarToPublicKey(child.kL[:])
+	pk, err := bitpieSeedToPublicKey(child.kL[:])
 	if err != nil {
 		t.Fatalf("DeriveChild(0) to public: %v", err)
 	}
@@ -65,7 +65,7 @@ func testKnownAnswerBitpie(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeriveChild(0) (m/0/0): %v", err)
 	}
-	pk, err = ScalarToPublicKey(child.kL[:])
+	pk, err = bitpieSeedToPublicKey(child.kL[:])
 	if err != nil {
 		t.Fatalf("DeriveChild(0) to public: %v", err)
 	}

@@ -63,6 +63,15 @@ func (n *Node) GetExtendedPrivateKey() []byte {
 	return r
 }
 
+// GetBitpiePrivateKey returns the Oasis network private key associated
+// with a node, derived using the Bitpie method.
+//
+// Just use Ristretto, but using kL as the RFC 8032 seeds is marginally
+// less bad than BIP-Ed25519.
+func (n *Node) GetBitpiePrivateKey() ed25519.PrivateKey {
+	return ed25519.NewKeyFromSeed(n.kL[:])
+}
+
 // DeriveChild derives a sub-key with the provided index.
 func (n *Node) DeriveChild(idx uint32) (*Node, error) {
 	if n.isBitpie {

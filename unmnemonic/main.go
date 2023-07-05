@@ -22,6 +22,7 @@ import (
 const (
 	algoLedger  = "Ledger"
 	algoAdr0008 = "ADR-0008"
+	algoBitpie  = "Bitpie"
 
 	maxAccountKeyNumber = uint32(0x7fffffff)
 )
@@ -49,7 +50,7 @@ func doInteractive() error {
 	var algo string
 	if err := survey.AskOne(&survey.Select{
 		Message: "Which algorithm does your wallet use",
-		Options: []string{algoAdr0008, algoLedger},
+		Options: []string{algoAdr0008, algoLedger, algoBitpie},
 	}, &algo); err != nil {
 		return err
 	}
@@ -129,6 +130,8 @@ func doInteractive() error {
 		infos, err = deriveLedger(seed, indexes)
 	case algoAdr0008:
 		infos, err = deriveAdr0008(seed, indexes)
+	case algoBitpie:
+		infos, err = deriveBitpie(seed, indexes)
 	default:
 		return fmt.Errorf("unknown algorithm")
 	}
@@ -237,6 +240,37 @@ func deriveAdr0008(seed []byte, indexes []uint32) ([]*walletInfo, error) {
 			return nil, fmt.Errorf("failed to derive key for index %d: %w", index, err)
 		}
 		privateKey := ed25519.NewKeyFromSeed(child[:])
+		address, err := address.FromPublicKey(privateKey.Public())
+		if err != nil {
+			return nil, fmt.Errorf("failed to derive address for index %d: %w", index, err)
+		}
+		infos = append(infos, &walletInfo{
+			index:      index,
+			privateKey: privateKey,
+			address:    address,
+		})
+	}
+
+	return infos, nil
+}
+
+func deriveBitpie(seed []byte, indexes []uint32) ([]*walletInfo, error) {
+	root, err := bip32.NewBitpieRoot(seed)
+	if err != nil {
+		return nil, fmt.Errorf("failed to derive Bitpie root: %w", err)
+	}
+	wallet, err := root.DerivePath("0")
+	if err != nil {
+		return nil, fmt.Errorf("failed to derive Bitpie wallet base: %w", err)
+	}
+
+	infos := make([]*walletInfo, 0, len(indexes))
+	for _, index := range indexes {
+		child, err := wallet.DeriveChild(index)
+		if err != nil {
+			return nil, fmt.Errorf("failed to derive key for index %d: %w", index, err)
+		}
+		privateKey := child.GetBitpiePrivateKey()
 		address, err := address.FromPublicKey(privateKey.Public())
 		if err != nil {
 			return nil, fmt.Errorf("failed to derive address for index %d: %w", index, err)

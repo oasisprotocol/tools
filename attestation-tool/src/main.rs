@@ -19,6 +19,7 @@ use sgx_isa::Targetinfo;
 use sgxs_loaders::isgx::Device as IsgxDevice;
 use std::process;
 
+const IAS_OPF_DEV_URL: &'static str = "https://iasproxy-dev.oasis.io/";
 const IAS_PROXY_URL: &'static str = "https://iasproxy.fortanix.com/";
 const IAS_PROD_OLD_URL: &'static str = "https://as.sgx.trustedservices.intel.com/";
 const IAS_DEV_OLD_URL: &'static str = "https://test-as.sgx.trustedservices.intel.com/";
@@ -41,7 +42,7 @@ async fn main() {
     let matches = clap_app!(attestation_tool =>
         (author: "Fortanix")
         (about: "SGX Remote Attestation Tool")
-        (@arg IAS_URL: --("ias") +required +takes_value default_value("ftx-proxy") "URL of the IAS to use, or one of the special values \"intel-dev\", \"intel-liv\", \"ftx-proxy\". Attestation will be skipped if this parameter is not specified.")
+        (@arg IAS_URL: --("ias") +required +takes_value default_value("opf-dev-proxy") "URL of the IAS to use, or one of the special values \"intel-dev\", \"intel-liv\", \"ftx-proxy\", \"opf-dev-proxy\". Attestation will be skipped if this parameter is not specified.")
         (@arg ALT_PATH: --("ias-alt-path") "Use the alternate IAS API paths (default for version 4 and up)")
         (@arg VERSION: --("version") +takes_value "IAS version to use (2, 3, 4)")
         (@arg SUBSCRIPTION_KEY: --("subscription-key") +takes_value conflicts_with("CERTIFICATE") "Subscription key to use to authenticate to IAS")
@@ -69,6 +70,7 @@ async fn main() {
         ("intel-liv", false) => IAS_PROD_OLD_URL,
         ("intel-liv", true) => IAS_PROD_URL,
         ("ftx-proxy", _) => IAS_PROXY_URL,
+        ("opf-dev-proxy", _) => IAS_OPF_DEV_URL,
         (url, _) => url,
     };
 

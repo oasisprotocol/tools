@@ -1,8 +1,7 @@
 # attestation-tool
 
-Tool for testing remote attestation against the Intel SGX's development server.
-
-It does so via the IAS proxy kindly provided by [Fortanix].
+Tool for testing remote attestation against the Intel SGX's development server
+through the Oasis Protocol Foundations IAS proxy.
 
 [Fortanix]: https://www.fortanix.com/
 

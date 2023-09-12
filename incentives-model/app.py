@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Incentives."""
 import math
 import pandas as pd
@@ -12,6 +13,7 @@ app = Dash(
     __name__,
     external_stylesheets=[dbc.themes.LUX, dbc.icons.BOOTSTRAP],
 )
+server = app.server
 
 def estimate(df, percent, common_pool, staked_tokens):
     """estimate
@@ -225,4 +227,4 @@ def update_estimation(input_common_pool, input_percent, input_staked_tokens,
 app.layout = layout()
 
 if __name__ == '__main__':
-    app.run_server(debug=False)
+    app.run(debug=False)

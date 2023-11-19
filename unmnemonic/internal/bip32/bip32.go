@@ -1,4 +1,4 @@
-// Package bip32 implements the legacy Oasis Ledger app variant of
+// Package bip32 implements the various screwed up legacy Oasis variants of
 // BIP32-Ed25519.
 package bip32
 
@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/oasisprotocol/curve25519-voi/curve"
 	"github.com/oasisprotocol/curve25519-voi/curve/scalar"
 	"github.com/oasisprotocol/curve25519-voi/primitives/ed25519"
 
@@ -40,49 +41,97 @@ type Node struct {
 	kR [32]byte
 	c  [32]byte
 
-	isRoot bool
+	isRoot   bool
+	isBitpie bool
 }
 
-// GetOasisPrivateKey returns the Oasis network private key associated with
-// a node.  Normal BIP32-Ed25519 implementations would use kL | kR (and A),
-// but the Ledger app just uses kL as the RFC 8032 seed.
+// GetLedgerPrivateKey returns the Oasis network private key associated
+// with a node, derived using the legacy Ledger method.
 //
-// Just use Ristretto, but at least this is somewhat more sane than
-// the original BIP-Ed25519 implementation.
-func (n *Node) GetOasisPrivateKey() ed25519.PrivateKey {
+// Just use Ristretto, but using kL as the RFC 8032 seeds is marginally
+// less bad than BIP-Ed25519.
+func (n *Node) GetLedgerPrivateKey() ed25519.PrivateKey {
+	return ed25519.NewKeyFromSeed(n.kL[:])
+}
+
+// GetExtendedPrivateKey returns the Oasis network private key associated
+// with a node, in the BIP-Ed25519 extended format.
+func (n *Node) GetExtendedPrivateKey() []byte {
+	var r []byte
+	r = append([]byte{}, n.kL[:]...)
+	r = append(r, n.kR[:]...)
+	return r
+}
+
+// GetBitpiePrivateKey returns the Oasis network private key associated
+// with a node, derived using the Bitpie method.
+//
+// Just use Ristretto, but using kL as the RFC 8032 seeds is marginally
+// less bad than BIP-Ed25519.
+func (n *Node) GetBitpiePrivateKey() ed25519.PrivateKey {
 	return ed25519.NewKeyFromSeed(n.kL[:])
 }
 
 // DeriveChild derives a sub-key with the provided index.
 func (n *Node) DeriveChild(idx uint32) (*Node, error) {
-	if idx < HardenedIndexOffset {
-		return nil, fmt.Errorf("bip32: index not hardened")
+	if n.isBitpie {
+		return n.deriveBitpieChild(idx)
+	}
+
+	// BIP32-Ed25519 is a steaming pile of shit, and really shouldn't be
+	// used at all, which is why we don't use it.  Unfortunately legacy
+	// applications exist.
+	//
+	// * Ledger uses k_L as the RFC 8032 seed, and only uses hardened paths.
+
+	isHardened := idx >= HardenedIndexOffset
+
+	var aBytes []byte
+	if !isHardened {
+		// Non-hardened derivation requires feeding A_P into the HMAC
+		// calls, so we need to derive it.
+		pk, err := ScalarToPublicKey(n.kL[:])
+		if err != nil {
+			return nil, err
+		}
+
+		aBytes = pk
 	}
 
 	var iBytes [4]byte
 	binary.LittleEndian.PutUint32(iBytes[:], idx)
 
-	// Note: This only supports hardened derivation, because that is all
-	// Oasis uses.
-
-	// Z = FcP (0x00 || k_P || i), i >= 2^31
-	// ci = FcP (0x01 || k_P || i), i >= 2^31 where the output of F is truncated to the right 32 bytes.
-
 	zMac := hmac.New(sha512.New, n.c[:])
-	_, _ = zMac.Write([]byte{0x00})
-	_, _ = zMac.Write(n.kL[:])
-	_, _ = zMac.Write(n.kR[:])
+	switch isHardened {
+	case true:
+		// Z = FcP (0x00 || k_P || i), i >= 2^31
+		_, _ = zMac.Write([]byte{0x00})
+		_, _ = zMac.Write(n.kL[:])
+		_, _ = zMac.Write(n.kR[:])
+	case false:
+		// Z = FcP (0x02 || A_P || i), i < 2^31
+		_, _ = zMac.Write([]byte{0x02})
+		_, _ = zMac.Write(aBytes)
+	}
 	_, _ = zMac.Write(iBytes[:])
 	z := zMac.Sum(nil)
 
 	cMac := hmac.New(sha512.New, n.c[:])
-	_, _ = cMac.Write([]byte{0x01})
-	_, _ = cMac.Write(n.kL[:])
-	_, _ = cMac.Write(n.kR[:])
+	switch isHardened {
+	case true:
+		// ci = FcP (0x01 || k_P || i), i >= 2^31
+		_, _ = cMac.Write([]byte{0x01})
+		_, _ = cMac.Write(n.kL[:])
+		_, _ = cMac.Write(n.kR[:])
+	case false:
+		// ci = FcP (0x03 || A_P || i), i < 2^31
+		_, _ = cMac.Write([]byte{0x03})
+		_, _ = cMac.Write(aBytes)
+	}
 	_, _ = cMac.Write(iBytes[:])
 	c := cMac.Sum(nil)
 	var childNode Node
-	copy(childNode.c[:], c[32:])
+	copy(childNode.c[:], c[32:]) // where the output of F is truncated to the right 32 bytes.
 
 	// ZL, ZR = Z[:28], Z[32:]
 	copy(childNode.kL[:], z[:28]) // left 28-bytes
@@ -133,9 +182,7 @@ func (n *Node) DerivePath(path string) (*Node, error) {
 	splitPath := strings.Split(path, "/")
 	indices := make([]uint32, 0, len(splitPath))
 	for _, pathEntry := range splitPath {
-		if !strings.HasSuffix(pathEntry, hardenedSuffix) {
-			return nil, fmt.Errorf("bip32: path component '%s': not hardened", pathEntry)
-		}
+		isHardened := strings.HasSuffix(pathEntry, hardenedSuffix)
 		s := strings.TrimSuffix(pathEntry, hardenedSuffix)
 		i, err := strconv.ParseUint(s, 10, 32)
 		if err != nil {
@@ -143,6 +190,9 @@ func (n *Node) DerivePath(path string) (*Node, error) {
 		}
 		if i >= HardenedIndexOffset {
 			return nil, fmt.Errorf("bip32: path component '%s': out of range", pathEntry)
+		}
+		if isHardened {
+			i += HardenedIndexOffset
 		}
 		indices = append(indices, uint32(i))
 	}
@@ -156,7 +206,7 @@ func (n *Node) DerivePath(path string) (*Node, error) {
 	var err error
 	ret := n
 	for _, idx := range indices {
-		ret, err = ret.DeriveChild(idx + HardenedIndexOffset)
+		ret, err = ret.DeriveChild(idx)
 		if err != nil {
 			return nil, fmt.Errorf("bip32: failed to derive child %d': %w", idx, err)
 		}
@@ -165,8 +215,9 @@ func (n *Node) DerivePath(path string) (*Node, error) {
 	return ret, nil
 }
 
-// NewRoot returns the root (master) node, corresponding to the provided seed.
-func NewRoot(seed []byte) (*Node, error) {
+// NewLedgerRoot returns the root (master) node, corresponding to the
+// provided seed, using the fucked up Ledger BIP32-Ed25519 variant.
+func NewLedgerRoot(seed []byte) (*Node, error) {
 	sTmp := append([]byte{}, seed...) // Copy
 
 	var (
@@ -214,11 +265,68 @@ func NewRoot(seed []byte) (*Node, error) {
 
 	// BIP32-Ed25519 requires that the scalar clamping is applied
 	// to kL (Master secret) as in vanilla Ed25519pure.
-	n.kL[0] &= 248
-	n.kL[31] &= 127
-	n.kL[31] |= 64
+	clampScalar(n.kL[:])
 
 	n.isRoot = true
 
 	return &n, nil
+}
+
+// NewRoot returns the root (master) node, corresponding to the provided
+// seed.
+func NewRoot(seed []byte) (*Node, error) {
+	// k' = H512(k)
+	kPrime := sha512.Sum512(seed)
+
+	var n Node
+	copy(n.kL[:], kPrime[:32])
+	copy(n.kR[:], kPrime[32:])
+
+	// If the third highest bit of the last byte of kL is not zero,
+	// discard k'.
+	if n.kL[31]&0x20 == 0x20 { // ~0b00100000
+		return nil, fmt.Errorf("bip32: invalid k")
+	}
+
+	// BIP32-Ed25519 requires that the scalar clamping is applied
+	// to kL (Master secret) as in vanilla Ed25519pure.
+	clampScalar(n.kL[:])
+
+	// Derive c = H256(0x01 | k).
+	h := sha256.New()
+	_, _ = h.Write([]byte{0x01})
+	_, _ = h.Write(seed)
+	c := h.Sum(nil)
+	copy(n.c[:], c)
+
+	n.isRoot = true
+
+	return &n, nil
+}
+
+// ScalarToPublicKey converts a scalar to a public key.
+func ScalarToPublicKey(rawScalar []byte) (ed25519.PublicKey, error) {
+	if l := len(rawScalar); l != scalar.ScalarSize {
+		return nil, fmt.Errorf("bip32: invalid scalar lenght: %v", l)
+	}
+
+	var s scalar.Scalar
+	if _, err := s.SetBits(clampScalar(append([]byte{}, rawScalar...))); err != nil {
+		return nil, fmt.Errorf("bip32: failed to deserialize scalar: %w", err)
+	}
+
+	var (
+		A           curve.EdwardsPoint
+		aCompressed curve.CompressedEdwardsY
+	)
+	aCompressed.SetEdwardsPoint(A.MulBasepoint(curve.ED25519_BASEPOINT_TABLE, &s))
+
+	return ed25519.PublicKey(aCompressed[:]), nil
+}
+
+func clampScalar(s []byte) []byte {
+	s[0] &= 248
+	s[31] &= 127
+	s[31] |= 64
+	return s
 }

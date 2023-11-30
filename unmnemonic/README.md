@@ -7,6 +7,7 @@ The currently supported methods are:
 
 - ADR-0008 SLIP-0010
 - Legacy pre-SLIP Oasis Ledger
+- BitPie
 
 It is intended to be used for the purposes of migration and/or disaster
 recovery.  Use of this tool can lead to the total compromise of all accounts

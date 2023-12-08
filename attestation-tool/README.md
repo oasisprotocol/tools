@@ -1,7 +1,6 @@
 # attestation-tool
 
-Tool for testing remote attestation against the Intel SGX's development server
-through the Oasis Protocol Foundations IAS proxy.
+Tool for testing remote attestation using DCAP and EPID attesttions.
 
 [Fortanix]: https://www.fortanix.com/
 
@@ -41,8 +40,9 @@ The binary will be located in `target/release/attestation-tool`.
 
 ## Using
 
-To test remote attestation against the development server, simply run the
-resulting binary:
+### DCAP
+
+To test DCAP remote attestation simply run the resulting binary:
 
 ```
 ./attestation-tool
@@ -52,6 +52,47 @@ _NOTE: You might need to run this as `root` user or via `sudo`._
 
 The output may be something like the following:
 ```
+Testing DCAP (ECDSA) attestation
+Using PCCS URL: "https://api.trustedservices.intel.com/sgx/certification/v4/tcb?fmspc=00606a000000"
+FMSPC: "00606a000000"
+System PCSEVN: 13
+TCB component SVN: [12, 12, 3, 3, 255, 255, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+TCB level PCSESVN: 13
+SGX components: [TCBComponent { svn: 12, category: "BIOS", tcb_comp_type: "Early Microcode Update" }, TCBComponent { svn: 12, category: "OS/VMM", tcb_comp_type: "SGX Late Microcode Update" }, TCBComponent { svn: 3, category: "OS/VMM", tcb_comp_type: "TXT SINIT" }, TCBComponent { svn: 3, category: "BIOS", tcb_comp_type: "" }, TCBComponent { svn: 255, category: "", tcb_comp_type: "" }, TCBComponent { svn: 255, category: "", tcb_comp_type: "" }, TCBComponent { svn: 1, category: "", tcb_comp_type: "" }, TCBComponent { svn: 0, category: "", tcb_comp_type: "" }, TCBComponent { svn: 0, category: "", tcb_comp_type: "" }, TCBComponent { svn: 0, category: "", tcb_comp_type: "" }, TCBComponent { svn: 0, category: "", tcb_comp_type: "" }, TCBComponent { svn: 0, category: "", tcb_comp_type: "" }, TCBComponent { svn: 0, category: "", tcb_comp_type: "" }, TCBComponent { svn: 0, category: "", tcb_comp_type: "" }, TCBComponent { svn: 0, category: "", tcb_comp_type: "" }, TCBComponent { svn: 0, category: "", tcb_comp_type: "" }]
+TCB status: SWHardeningNeeded
+TCB Advisory IDs: ["INTEL-SA-00615"]
+Verifying QE identity
+Using PCCS URL: "https://api.trustedservices.intel.com/sgx/certification/v4/qe/identity"
+Quoting Enclave: verified and up to date
+DCAP (ECDSA) succeeded
+```
+
+#### Success
+
+In case the reported TCB status is: `UpToDate` or `SWHardeningNeeded` and
+"DCAP (ECDSA) succeeded" is outputed.
+
+#### Failure
+
+In case the tool reports "DCAP (ECDSA) failed" or
+"DCAP (ECDSA) invalid TCB status: OutOfDate".
+
+In case DCAP attestation was succesful but an invalid TCB status was reported
+make sure that the system platform is up to date (a BIOS update might be
+required).
+
+### (legacy) EPID
+
+To test (legacy) EPID remote attestation against the development server, include
+the `--epid` flag:
+
+```
+./attestation-tool --epid
+```
+
+The output may be something like the following:
+```
+Testing EPID attestation
 Using IAS URL: https://iasproxy.fortanix.com/
 Enclave report contents:
   CPUSVN: 13130207ff8006000000000000000000
@@ -87,12 +128,12 @@ Advisory URL: https://security-center.intel.com
 Advisory IDs: INTEL-SA-00334, INTEL-SA-00615
 ```
 
-### Success
+#### Success
 
 In case the report omits the `Platform status` section near the end, then
 your attestation was successful.
 
-### Failure
+#### Failure
 
 In case the report containes the `Platform status` section near the end, then
 your attestation was NOT successful.

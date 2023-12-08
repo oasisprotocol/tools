@@ -6,16 +6,31 @@ license = "MPL-2.0"
 edition = "2018"
 
 [dependencies]
-ias = { version = "0.1.0", features = ["client", "mbedtls"] }
+# Oasis-core deps.
+oasis-core-runtime = { git = "https://github.com/oasisprotocol/oasis-core", tag = "v23.0.9" }
+
+# Fortanix deps.
 aesm-client = { version = "0.5", features = ["sgxs"] }
-sgxs = { version = "0.7" }
-sgxs-loaders = { version = "0.3" }
+dcap-ql = { version = "0.3.0", features = ["verify"] }
+ias = { version = "0.1.0", features = ["client", "mbedtls"] }
 report-test = { version = "0.3" }
 sgx-isa = { version = "0.4" }
+sgxs = { version = "0.7" }
+sgxs-loaders = { version = "0.3" }
 
-clap = "2.23.3"
-pkix = "0.1"
-lazy_static = "1"
-tokio = { version = "1", features = ["macros"] }
+# Others.
+anyhow = "1.0"
 base64 = { version = "0.13" }
+byteorder = "1.4.3"
+clap = "2.23.3"
 env_logger = "0.9.0"
+hex = "0.4"
+lazy_static = "1"
+mbedtls = "0.8.1"
+pkix = "0.1"
+rustc-hex = "2.1.0"
+serde = { version = "1.0.144", features = ["derive"] }
+serde_json = { version = "1.0.87", features = ["raw_value"] }
+tokio = { version = "1.29.1", features = ["macros"] }
+ureq = "2.8.0"
+yasna = { version = "0.5.0", features = ["num-bigint"] }

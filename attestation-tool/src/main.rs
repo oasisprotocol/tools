@@ -10,6 +10,8 @@ extern crate clap;
 use std::fmt;
 use std::str;
 
+use oasis_core_runtime::common::sgx::pcs::TCBStatus;
+
 use aesm_client::{AesmClient, QuoteType};
 use ias::api::{IasVersion, PlatformStatus, VerifyAttestationEvidenceRequest, LATEST_IAS_VERSION};
 use ias::client::ClientBuilder;
@@ -18,6 +20,8 @@ use pkix::pem::{self, PEM_CERTIFICATE};
 use sgx_isa::Targetinfo;
 use sgxs_loaders::isgx::Device as IsgxDevice;
 use std::process;
+
+mod ecdsa;
 
 const IAS_OPF_DEV_URL: &'static str = "https://iasproxy-dev.oasis.io/";
 const IAS_PROXY_URL: &'static str = "https://iasproxy.fortanix.com/";
@@ -42,16 +46,46 @@ async fn main() {
     let matches = clap_app!(attestation_tool =>
         (author: "Fortanix")
         (about: "SGX Remote Attestation Tool")
-        (@arg IAS_URL: --("ias") +required +takes_value default_value("opf-dev-proxy") "URL of the IAS to use, or one of the special values \"intel-dev\", \"intel-liv\", \"ftx-proxy\", \"opf-dev-proxy\". Attestation will be skipped if this parameter is not specified.")
+        (@arg EPID: --("epid") "Test EPID attestation")
+        (@arg IAS_URL: --("ias") +takes_value default_value("opf-dev-proxy") "URL of the IAS to use, or one of the special values \"intel-dev\", \"intel-liv\", \"ftx-proxy\", \"opf-dev-proxy\". Attestation will be skipped if this parameter is not specified.")
         (@arg ALT_PATH: --("ias-alt-path") "Use the alternate IAS API paths (default for version 4 and up)")
         (@arg VERSION: --("version") +takes_value "IAS version to use (2, 3, 4)")
         (@arg SUBSCRIPTION_KEY: --("subscription-key") +takes_value conflicts_with("CERTIFICATE") "Subscription key to use to authenticate to IAS")
         (@arg CERTIFICATE: --("client-cert") +takes_value requires("CERTIFICATE_PASS") "Filename of a certificate and private key in PKCS#12 format to use to authenticate to IAS")
         (@arg CERTIFICATE_PASS: --("client-cert-password") +takes_value "Password for PKCS#12 file")
-        (@arg DUMP: --("dump") "Dump the report in hex")
+        (@arg DUMP: --("dump") "Dump the IAS report in hex")
         (@arg SPID: --("spid") +takes_value "SPID to use")
     ).get_matches();
 
+    let mut loader = IsgxDevice::new()
+        .unwrap()
+        .einittoken_provider(AesmClient::new())
+        .build();
+    let aesm_client = AesmClient::new();
+
+    if !matches.is_present("EPID") {
+        // DCAP.
+        println!("Testing DCAP (ECDSA) attestation");
+        match ecdsa::try_ecdsa(&aesm_client, &mut loader) {
+            Ok(status) => {
+                println!("DCAP (ECDSA) succeeded");
+                match status {
+                    TCBStatus::UpToDate => (),
+                    TCBStatus::SWHardeningNeeded => (),
+                    status => {
+                        println!("DCAP (ECDSA) invalid TCB status: {:?}", status);
+                    }
+                }
+            }
+            Err(err) => {
+                println!("DCAP (ECDSA) failed: {}", err);
+            }
+        }
+        return;
+    }
+
+    // EPID.
+    println!("Testing EPID attestation");
     let version = match matches.value_of("VERSION") {
         None => LATEST_IAS_VERSION,
         Some("2") => IasVersion::V2,
@@ -94,16 +128,9 @@ async fn main() {
     }
     let ias_client = builder.ias_version(version).build(url).unwrap();
 
-    let aesm_client = AesmClient::new();
-
     let quote = aesm_client.init_quote().unwrap();
 
     let ti = Targetinfo::try_copy_from(quote.target_info()).unwrap();
-
-    let mut loader = IsgxDevice::new()
-        .unwrap()
-        .einittoken_provider(AesmClient::new())
-        .build();
 
     let report = report_test::report(&ti, &mut loader).unwrap();
 

@@ -94,7 +94,7 @@ def layout():
                 dcc.Input(
                     id='input_common_pool',
                     type='number',
-                    min=800000000, step=1, value=823596326),
+                    min=0, step=1, value=741546689),
             ]),
             html.Div([
                 html.P(
@@ -105,7 +105,7 @@ def layout():
                 dcc.Input(
                     id='input_staked_tokens',
                     type='number',
-                    min=0, step=1, value=5070920454),
+                    min=0, step=1, value=4653472533),
             ]),
             html.Br(),
             html.H5(id="", children='Estimate a Validator\'s Earnings'),
@@ -206,7 +206,7 @@ def update_estimation(input_common_pool, input_percent, input_staked_tokens,
         title="Staking Rewards Schedule",
     )
 
-    estimated_rewards = updated_df["Estimated annualized rewards %"].min()
+    estimated_rewards = updated_df["Estimated annualized rewards %"].iloc[-1]
     rewards = (0.01*estimated_rewards/12) * input_validator_stake * \
         input_rose_price * input_commission
 

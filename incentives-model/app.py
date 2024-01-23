@@ -83,7 +83,7 @@ def layout():
                 dcc.Input(
                     id='input_percent',
                     type='number',
-                    min=0, max=20, step=1, value=2),
+                    min=0, max=20, step=0.01, value=2),
             ]),
             html.Div([
                 html.P(

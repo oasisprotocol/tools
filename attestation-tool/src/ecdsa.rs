@@ -303,7 +303,7 @@ pub fn try_ecdsa(aesm_client: &AesmClient, loader: &mut IsgxDevice) -> Result<TC
 
     // Fetch TCB info from PCS.
     let url = format!(
-        "{TCB_URL}?fmspc={fmspc_hex}",
+        "{TCB_URL}?fmspc={fmspc_hex}&update=early",
         fmspc_hex = hex::encode(&fmspc)
     );
     println!("Using PCCS URL: {:?}", url);
@@ -354,8 +354,9 @@ pub fn try_ecdsa(aesm_client: &AesmClient, loader: &mut IsgxDevice) -> Result<TC
     let report = Report::try_copy_from(&report).ok_or(anyhow!("could not construct QE3 report"))?;
 
     // Fetch QE identity from PCS.
-    println!("Using PCCS URL: {:?}", QE_IDENTITY_URL);
-    let response = ureq::get(QE_IDENTITY_URL).call()?;
+    let url = format!("{QE_IDENTITY_URL}?update=early");
+    println!("Using PCCS URL: {:?}", url);
+    let response = ureq::get(&url).call()?;
     let qe_identity: QEIdentityResponse = serde_json::from_str(&response.into_string()?)
         .map_err(|err| anyhow!("error parsing QE identity: {}", err))?;
     let qe_identity = qe_identity.enclave_identity;

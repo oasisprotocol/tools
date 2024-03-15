@@ -21,10 +21,11 @@ use {
 pub enum IasVersion {
     V2 = 2,
     V3,
-    V4
+    V4,
+    V5
 }
 
-pub const LATEST_IAS_VERSION: IasVersion = IasVersion::V4;
+pub const LATEST_IAS_VERSION: IasVersion = IasVersion::V5;
 
 /// Adapts `serde_bytes` for `Option<T: AsRef<[u8]>>` and `Option<T: From<Vec<u8>>>`
 mod serde_option_bytes {
@@ -242,6 +243,9 @@ pub struct VerifyAttestationEvidenceResponse<V: VerificationType = VerifiedSig> 
     #[serde(skip_serializing_if = "Option::is_none", rename = "advisoryIDs")]
     advisory_ids: Option<Vec<IasAdvisoryId>>,
 
+    #[serde(skip_serializing_if = "Option::is_none", rename = "tcbEvaluationDataNumber")]
+    tcb_evaluation_data_number: Option<u32>,
+
     #[serde(skip)]
     type_: PhantomData<V>
 }
@@ -282,6 +286,7 @@ impl VerifyAttestationEvidenceResponse {
             epid_pseudonym,
             advisory_url,
             advisory_ids,
+            tcb_evaluation_data_number,
             type_: _,
         } = resp;
 
@@ -299,6 +304,7 @@ impl VerifyAttestationEvidenceResponse {
             epid_pseudonym,
             advisory_url,
             advisory_ids,
+            tcb_evaluation_data_number,
             type_: PhantomData,
         })
     }
@@ -352,6 +358,10 @@ impl VerifyAttestationEvidenceResponse {
 
     pub fn advisory_ids(&self) -> &Option<Vec<IasAdvisoryId>> {
         &self.advisory_ids
+    }
+
+    pub fn tcb_evaluation_data_number(&self) -> &Option<u32> {
+        &self.tcb_evaluation_data_number
     }
 }
 

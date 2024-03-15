@@ -337,6 +337,10 @@ pub fn try_ecdsa(aesm_client: &AesmClient, loader: &mut IsgxDevice) -> Result<TC
         ))?
         .clone();
 
+    println!(
+        "TCB evaluation data number: {:?}",
+        tcb.tcb_evaluation_data_number
+    );
     println!("FMSPC: {:?}", tcb.fmspc);
     println!("System PCSEVN: {:?}", pcesvn);
     println!("TCB component SVN: {:?}", tcb_comp_svn);

@@ -280,7 +280,7 @@ impl Client {
     /// Call the “Verify Attestation Evidence” API.
     ///
     /// This is the standard IAS API.
-    pub async fn verify_quote(&self, quote: &[u8]) -> Result<IasVerificationResult> {
+    pub async fn verify_quote(&self, quote: &[u8], update: Option<&str>) -> Result<IasVerificationResult> {
         let req = VerifyAttestationEvidenceRequest {
             isv_enclave_quote: quote.to_owned(),
             pse_manifest: None,
@@ -293,7 +293,12 @@ impl Client {
         let ser = serde_bytes_repr::ByteFmtSerializer::base64(&mut ser, base64::Config::new(base64::CharacterSet::Standard, true));
         req.serialize(ser).map_err(|e| format!("Error serializing JSON request: {}", e))?;
 
-        let res = self.inner.post(self.url.join(&self.ias_path)?.join(API_REPORT)?)
+        let mut url = self.url.join(&self.ias_path)?.join(API_REPORT)?;
+        if let Some(update) = update {
+            url.query_pairs_mut().append_pair("update", update);
+        }
+
+        let res = self.inner.post(url)
             .apply_credentials(self)
             .body(json)
             .header("Content-Type", "application/json")

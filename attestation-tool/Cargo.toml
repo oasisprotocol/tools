@@ -12,7 +12,7 @@ oasis-core-runtime = { git = "https://github.com/oasisprotocol/oasis-core", tag 
 # Fortanix deps.
 aesm-client = { version = "0.5", features = ["sgxs"] }
 dcap-ql = { version = "0.3.0", features = ["verify"] }
-ias = { version = "0.1.0", features = ["client", "mbedtls"] }
+ias = { path = "ias", features = ["client", "mbedtls"] }
 report-test = { version = "0.3" }
 sgx-isa = { version = "0.4" }
 sgxs = { version = "0.7" }

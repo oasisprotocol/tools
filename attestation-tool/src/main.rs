@@ -49,7 +49,7 @@ async fn main() {
         (@arg EPID: --("epid") "Test EPID attestation")
         (@arg IAS_URL: --("ias") +takes_value default_value("opf-dev-proxy") "URL of the IAS to use, or one of the special values \"intel-dev\", \"intel-liv\", \"ftx-proxy\", \"opf-dev-proxy\". Attestation will be skipped if this parameter is not specified.")
         (@arg ALT_PATH: --("ias-alt-path") "Use the alternate IAS API paths (default for version 4 and up)")
-        (@arg VERSION: --("version") +takes_value "IAS version to use (2, 3, 4)")
+        (@arg VERSION: --("version") +takes_value "IAS version to use (2, 3, 4, 5)")
         (@arg SUBSCRIPTION_KEY: --("subscription-key") +takes_value conflicts_with("CERTIFICATE") "Subscription key to use to authenticate to IAS")
         (@arg CERTIFICATE: --("client-cert") +takes_value requires("CERTIFICATE_PASS") "Filename of a certificate and private key in PKCS#12 format to use to authenticate to IAS")
         (@arg CERTIFICATE_PASS: --("client-cert-password") +takes_value "Password for PKCS#12 file")
@@ -91,6 +91,7 @@ async fn main() {
         Some("2") => IasVersion::V2,
         Some("3") => IasVersion::V3,
         Some("4") => IasVersion::V4,
+        Some("5") => IasVersion::V5,
         Some(v) => {
             println!("Unable to parse IAS version: {}", v);
             return;
@@ -175,7 +176,7 @@ async fn main() {
     };
     println!("  QUOTE: {}", base64::encode(req.isv_enclave_quote));
 
-    match ias_client.verify_quote(quote.quote()).await {
+    match ias_client.verify_quote(quote.quote(), Some("early")).await {
         Ok(response) => {
             let report =
                 match response.verify::<Mbedtls>(&[IAS_REPORT_SIGNING_CERTIFICATE.as_slice()]) {
@@ -232,6 +233,10 @@ async fn main() {
                     || Box::new("None") as Box<dyn fmt::Display>,
                     |v| Box::new(HexPrint(&v))
                 )
+            );
+            println!(
+                "  tcb_evaluation_data_number: {:?}",
+                report.tcb_evaluation_data_number()
             );
 
             if pstatus.is_some()

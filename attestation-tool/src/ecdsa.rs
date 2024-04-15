@@ -41,6 +41,7 @@ lazy_static::lazy_static! {
 }
 
 // OIDs for PCK X509 certificate extensions.
+const PCK_SGX_EXTENSIONS_PPID_OID: &[u64] = &[1, 2, 840, 113741, 1, 13, 1, 1];
 const PCK_SGX_EXTENSIONS_OID: &[u64] = &[1, 2, 840, 113741, 1, 13, 1];
 const PCK_SGX_EXTENSIONS_FMSPC_OID: &[u64] = &[1, 2, 840, 113741, 1, 13, 1, 4];
 const PCK_SGX_EXTENSIONS_TCB_OID: &[u64] = &[1, 2, 840, 113741, 1, 13, 1, 2];
@@ -249,6 +250,7 @@ pub fn try_ecdsa(aesm_client: &AesmClient, loader: &mut IsgxDevice) -> Result<TC
         .ok_or(anyhow!(
             "TCB verification failed: missing SGX certificate extensions"
         ))?;
+    let mut ppid: Option<Vec<u8>> = None;
     let mut fmspc: Option<Vec<u8>> = None;
     let mut tcb_comp_svn: Option<[u32; 16]> = None;
     let mut pcesvn: Option<u32> = None;
@@ -256,6 +258,14 @@ pub fn try_ecdsa(aesm_client: &AesmClient, loader: &mut IsgxDevice) -> Result<TC
         reader.read_sequence_of(|reader| {
             reader.read_sequence(|reader| {
                 match reader.next().read_oid()?.as_ref() {
+                    PCK_SGX_EXTENSIONS_PPID_OID => {
+                        // PPID
+                        let raw_ppid = reader.next().read_bytes()?;
+                        if raw_ppid.len() != 16 {
+                            return Err(yasna::ASN1Error::new(yasna::ASN1ErrorKind::Invalid));
+                        }
+                        ppid = Some(raw_ppid);
+                    }
                     PCK_SGX_EXTENSIONS_FMSPC_OID => {
                         // FMSPC
                         let raw_fmspc = reader.next().read_bytes()?;
@@ -294,9 +304,18 @@ pub fn try_ecdsa(aesm_client: &AesmClient, loader: &mut IsgxDevice) -> Result<TC
         })
     })
     .map_err(|err| anyhow!("malformed PCK certificate: {}", err))?;
-    if fmspc.is_none() || tcb_comp_svn.is_none() || pcesvn.is_none() {
-        return Err(anyhow!("TCB verification failed: missing required fields"));
+
+    for (name, exists) in [
+        ("ppid", ppid.is_some()),
+        ("fmspc", fmspc.is_some()),
+        ("tcb_comp_svn", tcb_comp_svn.is_some()),
+        ("pcesvn", pcesvn.is_some()),
+    ] {
+        if !exists {
+            return Err(anyhow!("TCB verification failed: missing {}", name));
+        }
     }
+    let ppid = ppid.unwrap();
     let fmspc = fmspc.unwrap();
     let tcb_comp_svn = tcb_comp_svn.unwrap();
     let pcesvn = pcesvn.unwrap();
@@ -341,6 +360,7 @@ pub fn try_ecdsa(aesm_client: &AesmClient, loader: &mut IsgxDevice) -> Result<TC
         "TCB evaluation data number: {:?}",
         tcb.tcb_evaluation_data_number
     );
+    println!("PPID: {:?}", hex::encode(ppid));
     println!("FMSPC: {:?}", tcb.fmspc);
     println!("System PCSEVN: {:?}", pcesvn);
     println!("TCB component SVN: {:?}", tcb_comp_svn);

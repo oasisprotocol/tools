@@ -20,6 +20,7 @@ use pkix::pem::{self, PEM_CERTIFICATE};
 use sgx_isa::Targetinfo;
 use sgxs_loaders::isgx::Device as IsgxDevice;
 use std::process;
+use raw_cpuid::CpuId;
 
 mod ecdsa;
 
@@ -56,6 +57,8 @@ async fn main() {
         (@arg DUMP: --("dump") "Dump the IAS report in hex")
         (@arg SPID: --("spid") +takes_value "SPID to use")
     ).get_matches();
+
+    check_bios_settings();
 
     let mut loader = IsgxDevice::new()
         .unwrap()
@@ -281,6 +284,29 @@ async fn main() {
             println!("IAS error:");
             println!("  {}", err);
         }
+    }
+}
+
+fn check_bios_settings() {
+    let cpuid = CpuId::new();
+    if let Some(extended_features) = cpuid.get_extended_feature_info() {
+        if !extended_features.has_sgx() {
+            println!("SGX is not supported or not enabled in the BIOS.");
+            process::exit(1);
+        }
+    } else {
+        println!("Unable to get the extended CPU feature information.");
+        process::exit(1);
+    }
+
+    if let Some(features) = cpuid.get_feature_info() {
+        if !features.has_aesni() {
+            println!("AES-NI is not supported by the CPU or not enabled in the BIOS.");
+            process::exit(1);
+        }
+    } else {
+        println!("Unable to get the CPU feature information.");
+        process::exit(1);
     }
 }
 

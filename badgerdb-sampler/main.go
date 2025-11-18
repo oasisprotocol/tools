@@ -44,20 +44,20 @@ type DBStats struct {
 
 func main() {
 	if len(os.Args) < 3 {
-		fmt.Fprintf(os.Stderr, "Usage: %s <database-type> <path-to-db> [output-prefix] [max-samples]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s <database-type> <path-to-db> [output-json] [max-samples]\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "Database types: consensus-blockstore, consensus-evidence, consensus-mkvs, consensus-state, runtime-mkvs, runtime-history\n")
 		fmt.Fprintf(os.Stderr, "Example: %s consensus-blockstore /path/to/blockstore.badger.db\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "Example: %s runtime-mkvs /path/to/mkvs_storage.badger.db ./outputs/testnet-20220303/emerald- 500\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Example: %s runtime-mkvs /path/to/mkvs_storage.badger.db ./outputs/testnet-20220303/emerald-runtime-mkvs.json 500\n", os.Args[0])
 		os.Exit(1)
 	}
 
 	// Parse arguments
 	dbType := normalizeDBType(os.Args[1])
 	dbPath := os.Args[2]
-	outputPrefix := ""
+	jsonFile := ""
 	maxSamples := 200 // default
 	if len(os.Args) >= 4 {
-		outputPrefix = os.Args[3]
+		jsonFile = os.Args[3]
 	}
 	if len(os.Args) >= 5 {
 		var err error
@@ -103,19 +103,18 @@ func main() {
 
 	fmt.Println(string(output))
 
-	// Save results in JSON files in per-snapshot dir and per-database type with optional prefix
-	if outputPrefix != "" {
-		outputDir := filepath.Dir(outputPrefix)
-		err = os.MkdirAll(outputDir, 0755)
+	// Export to JSON if requested
+	if jsonFile != "" {
+		jsonDir := filepath.Dir(jsonFile)
+		err = os.MkdirAll(jsonDir, 0755)
 		if err != nil {
-			log.Printf("Warning: Could not create directory %s: %v", outputDir, err)
+			log.Printf("Warning: Failed to create directory %s: %v", jsonDir, err)
 		} else {
-			outputFile := outputPrefix + dbType + ".json"
-			err = os.WriteFile(outputFile, output, 0644)
+			err = os.WriteFile(jsonFile, output, 0644)
 			if err != nil {
-				log.Printf("Warning: Could not write to %s: %v", outputFile, err)
+				fmt.Fprintf(os.Stderr, "\nWarning: Failed to write JSON file %s: %v\n", jsonFile, err)
 			} else {
-				fmt.Fprintf(os.Stderr, "\nResults saved to: %s\n", outputFile)
+				fmt.Fprintf(os.Stderr, "\n✓ Results exported to: %s\n", jsonFile)
 			}
 		}
 	}

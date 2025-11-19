@@ -74,6 +74,7 @@ func main() {
 	}
 
 	// Open database with two-mode strategy (corruption handling)
+	fmt.Printf("Opening database %s (type: %s, size: %d bytes)...\n", dbPath, dbType, dbSize)
 	db, err := openDatabase(dbPath)
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
@@ -90,17 +91,18 @@ func main() {
 	}
 
 	// Collect samples
+	fmt.Printf("Collecting and decoding samples...\n")
 	err = collectSamples(db, &stats, maxSamples)
 	if err != nil {
 		log.Fatalf("Error collecting samples: %v", err)
 	}
 
-	// Output JSON
+	// Print results
+	fmt.Printf("Results:\n")
 	output, err := json.MarshalIndent(stats, "", "  ")
 	if err != nil {
 		log.Fatalf("Error marshaling JSON: %v", err)
 	}
-
 	fmt.Println(string(output))
 
 	// Export to JSON if requested
@@ -108,7 +110,7 @@ func main() {
 		jsonDir := filepath.Dir(jsonFile)
 		err = os.MkdirAll(jsonDir, 0755)
 		if err != nil {
-			log.Printf("Warning: Failed to create directory %s: %v", jsonDir, err)
+			log.Fprintf(os.Stderr, "\nWarning: Failed to create directory %s: %v", jsonDir, err)
 		} else {
 			err = os.WriteFile(jsonFile, output, 0644)
 			if err != nil {
@@ -286,7 +288,6 @@ func decodeValueConsensusBlockstore(keyType string, value []byte) (string, int64
 		if err := proto.Unmarshal(value, &state); err == nil {
 			return fmt.Sprintf("BlockStoreState{base: %d, height: %d}", state.Base, state.Height), 0
 		}
-		return fmt.Sprintf("Failed to decode BlockStoreState (size: %d bytes)", len(value)), 0
 
 	case "block_meta":
 		var meta tmproto.BlockMeta
@@ -315,7 +316,6 @@ func decodeValueConsensusBlockstore(keyType string, value []byte) (string, int64
 			return fmt.Sprintf("BlockMeta{height: %d, time: %s, chain: %s, num_txs: %d, app_hash: %s}",
 				meta.Header.Height, ts, chainID, meta.NumTxs, appHash), tsUnix
 		}
-		return fmt.Sprintf("Failed to decode BlockMeta (size: %d bytes)", len(value)), 0
 
 	case "block_part":
 		var part tmproto.Part
@@ -323,7 +323,6 @@ func decodeValueConsensusBlockstore(keyType string, value []byte) (string, int64
 			return fmt.Sprintf("Part{index: %d, bytes_size: %d, proof_total: %d}",
 				part.Index, len(part.Bytes), part.Proof.Total), 0
 		}
-		return fmt.Sprintf("Failed to decode Part (size: %d bytes)", len(value)), 0
 
 	case "block_commit":
 		var commit tmproto.Commit
@@ -331,27 +330,26 @@ func decodeValueConsensusBlockstore(keyType string, value []byte) (string, int64
 			return fmt.Sprintf("Commit{height: %d, round: %d, signatures: %d}",
 				commit.Height, commit.Round, len(commit.Signatures)), 0
 		}
-		return fmt.Sprintf("Failed to decode Commit (size: %d bytes)", len(value)), 0
 
 	case "seen_commit":
 		var commit tmproto.Commit
 		if err := proto.Unmarshal(value, &commit); err == nil {
-			return fmt.Sprintf("SeenCommit{height: %d, round: %d, signatures: %d}",
+			return fmt.Sprintf("Commit{height: %d, round: %d, signatures: %d}",
 				commit.Height, commit.Round, len(commit.Signatures)), 0
 		}
-		return fmt.Sprintf("Failed to decode SeenCommit (size: %d bytes)", len(value)), 0
 
 	case "block_hash":
 		// Block hash values are plain strings containing height numbers
 		height, err := strconv.ParseInt(string(value), 10, 64)
 		if err == nil {
-			return fmt.Sprintf("Height: %d", height), 0
+			return fmt.Sprintf("Hash{height: %d}", height), 0
 		}
-		return fmt.Sprintf("String: %s", string(value)), 0
 
 	default:
 		return fmt.Sprintf("Unknown type (size: %d bytes)", len(value)), 0
 	}
+
+	return fmt.Sprintf("Failed to decode blockstore (type: %s, size: %d bytes)", keyType, len(value)), 0
 }
 
 // analyzeKeyConsensusEvidence parses consensus-evidence key and returns key type and decoded representation
@@ -382,7 +380,7 @@ func decodeValueConsensusEvidence(keyType string, value []byte) string {
 			evidence.VoteA.Height, evidence.VoteB.Height)
 	}
 
-	return fmt.Sprintf("Evidence (size: %d bytes, type: %s)", len(value), keyType)
+	return fmt.Sprintf("Evidence (type: %s, size: %d bytes)", keyType, len(value))
 }
 
 // analyzeKeyConsensusMkvs parses consensus-mkvs key and returns key type and decoded representation
@@ -414,7 +412,7 @@ func analyzeKeyConsensusMkvs(key []byte) (string, string) {
 	switch prefixByte {
 	case 0x00:
 		// nodeKeyFmt: hash.Hash (32 bytes)
-		return "node", fmt.Sprintf("node:hash=%x", truncateBytes(data, 8))
+		return "node", fmt.Sprintf("node{hash: %x....}", truncateBytes(data, 8))
 	case 0x01:
 		// writeLogKeyFmt: uint64(version) + TypedHash(new root) + TypedHash(old root)
 		if len(data) >= 8 {
@@ -422,18 +420,18 @@ func analyzeKeyConsensusMkvs(key []byte) (string, string) {
 			if len(data) >= 8+33 { // version + first TypedHash (33 bytes in v3+)
 				rootType := data[8]
 				rootHash := data[9:9+32]
-				return "write_log", fmt.Sprintf("write_log:v=%d,new_root_type=%d,hash=%x...", version, rootType, truncateBytes(rootHash, 4))
+				return "write_log", fmt.Sprintf("write_log{v:%d, new_root_type:%d, hash: %x...}", version, rootType, truncateBytes(rootHash, 4))
 			}
-			return "write_log", fmt.Sprintf("write_log:v=%d", version)
+			return "write_log", fmt.Sprintf("write_log{v:%d}", version)
 		}
-		return "write_log", "write_log:<malformed>"
+		return "write_log", "write_log{<malformed>}"
 	case 0x02:
 		// rootsMetadataKeyFmt: uint64(version)
 		if len(data) >= 8 {
 			version := binary.BigEndian.Uint64(data[0:8])
-			return "roots_metadata", fmt.Sprintf("roots_metadata:v=%d", version)
+			return "roots_metadata", fmt.Sprintf("roots_metadata{v:%d}", version)
 		}
-		return "roots_metadata", "roots_metadata:<malformed>"
+		return "roots_metadata", "roots_metadata{<malformed>}"
 	case 0x03:
 		// rootUpdatedNodesKeyFmt: uint64(version) + TypedHash(root)
 		if len(data) >= 8 {
@@ -441,11 +439,11 @@ func analyzeKeyConsensusMkvs(key []byte) (string, string) {
 			if len(data) >= 8+33 { // version + TypedHash
 				rootType := data[8]
 				rootHash := data[9:9+32]
-				return "root_updated_nodes", fmt.Sprintf("root_updated_nodes:v=%d,root_type=%d,hash=%x...", version, rootType, truncateBytes(rootHash, 4))
+				return "root_updated_nodes", fmt.Sprintf("root_updated_nodes{v:%d, root_type:%d, hash:%x...}", version, rootType, truncateBytes(rootHash, 4))
 			}
-			return "root_updated_nodes", fmt.Sprintf("root_updated_nodes:v=%d", version)
+			return "root_updated_nodes", fmt.Sprintf("root_updated_nodes{v:%d}", version)
 		}
-		return "root_updated_nodes", "root_updated_nodes:<malformed>"
+		return "root_updated_nodes", "root_updated_nodes{<malformed>}"
 	case 0x04:
 		// metadataKeyFmt: no additional data
 		return "metadata", "metadata"
@@ -454,17 +452,17 @@ func analyzeKeyConsensusMkvs(key []byte) (string, string) {
 		if len(data) >= 33 {
 			rootType := data[0]
 			rootHash := data[1:33]
-			return "multipart_restore_log", fmt.Sprintf("multipart_restore_log:type=%d,hash=%x", rootType, truncateBytes(rootHash, 8))
+			return "multipart_restore_log", fmt.Sprintf("multipart_restore_log{type:%d, hash:%x}", rootType, truncateBytes(rootHash, 8))
 		}
-		return "multipart_restore_log", fmt.Sprintf("multipart_restore_log:hash=%x", truncateBytes(data, 8))
+		return "multipart_restore_log", fmt.Sprintf("multipart_restore_log{hash:%x}", truncateBytes(data, 8))
 	case 0x06:
 		// rootNodeKeyFmt: TypedHash (33 bytes)
 		if len(data) >= 33 {
 			rootType := data[0]
 			rootHash := data[1:33]
-			return "root_node", fmt.Sprintf("root_node:type=%d,hash=%x", rootType, truncateBytes(rootHash, 8))
+			return "root_node", fmt.Sprintf("root_node{type:%d, hash:%x}", rootType, truncateBytes(rootHash, 8))
 		}
-		return "root_node", fmt.Sprintf("root_node:hash=%x", truncateBytes(data, 8))
+		return "root_node", fmt.Sprintf("root_node{hash:%x}", truncateBytes(data, 8))
 	default:
 		return fmt.Sprintf("unknown_%02x", prefixByte), fmt.Sprintf("unknown_%02x:%x", prefixByte, truncateBytes(data, 8))
 	}

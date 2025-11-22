@@ -30,7 +30,7 @@ func openDatabase(path string) (*DB, error) {
 	// Try ReadOnly mode first (clean databases)
 	opts := badger.DefaultOptions(path)
 	opts.ReadOnly = true
-	opts.Logger = nil
+	// Keep default logger enabled for diagnostics
 
 	db, err := badger.Open(opts)
 	if err == nil {
@@ -69,7 +69,7 @@ func openDatabase(path string) (*DB, error) {
 	opts.CompactL0OnClose = false
 	opts.BypassLockGuard = true    // Allow concurrent access
 	opts.DetectConflicts = false   // Reduce overhead
-	opts.Logger = nil
+	// Keep default logger enabled for diagnostics
 
 	db, err = badger.Open(opts)
 	if err == nil {

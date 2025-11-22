@@ -55,7 +55,7 @@ func main() {
 	dbType := normalizeDBType(os.Args[1])
 	dbPath := os.Args[2]
 	jsonFile := ""
-	maxSamples := 200 // default
+	maxSamples := 1000 // default
 	if len(os.Args) >= 4 {
 		jsonFile = os.Args[3]
 	}
@@ -153,15 +153,25 @@ func collectSamples(db *DB, stats *DBStats, maxSamples int) error {
 	return db.View(func(txn *Txn) error {
 		opts := DefaultIteratorOptions
 		opts.PrefetchValues = true
-		opts.PrefetchSize = maxSamples
+		opts.PrefetchSize = 100            // Optimal prefetch size for BadgerDB
+		opts.AllVersions = false           // Only latest version of each key
 		it := txn.NewIterator(opts)
 		defer it.Close()
 
 		sampleCount := 0
+		startTime := time.Now()
+
+		fmt.Fprintf(os.Stderr, "Starting iteration...\n")
 
 		for it.Rewind(); it.Valid(); it.Next() {
 			if sampleCount >= maxSamples {
 				break
+			}
+
+			// Progress logging every 10 samples
+			if sampleCount > 0 && sampleCount%10 == 0 {
+				elapsed := time.Since(startTime)
+				fmt.Fprintf(os.Stderr, "  Progress: %d/%d samples collected (elapsed: %v)\n", sampleCount, maxSamples, elapsed.Round(time.Millisecond))
 			}
 			item := it.Item()
 			key := item.Key()
@@ -236,6 +246,8 @@ func collectSamples(db *DB, stats *DBStats, maxSamples int) error {
 		}
 
 		stats.SampleCount = sampleCount
+		elapsed := time.Since(startTime)
+		fmt.Fprintf(os.Stderr, "Iteration complete: %d samples in %v\n", sampleCount, elapsed.Round(time.Millisecond))
 		return nil
 	})
 }

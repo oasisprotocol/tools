@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/gogo/protobuf/proto"
 	tmproto "github.com/tendermint/tendermint/proto/tendermint/types"
 	tmstore "github.com/tendermint/tendermint/proto/tendermint/store"
@@ -42,6 +43,56 @@ type DBStats struct {
 	Samples         []Sample       `json:"samples"`
 }
 
+// Runtime history CBOR types (from oasis-core/go/runtime/history/db.go)
+
+// RuntimeHistoryMetadata represents the metadata stored in runtime history DB
+type RuntimeHistoryMetadata struct {
+	RuntimeID           []byte `cbor:"runtime_id"`
+	Version             uint64 `cbor:"version"`
+	LastConsensusHeight int64  `cbor:"last_consensus_height"`
+	LastRound           uint64 `cbor:"last_round"`
+}
+
+// RuntimeHistoryAnnotatedBlock represents an annotated block in runtime history
+type RuntimeHistoryAnnotatedBlock struct {
+	Height int64                    `cbor:"consensus_height"`
+	Block  *RuntimeHistoryBlock     `cbor:"block"`
+}
+
+// RuntimeHistoryBlock represents a runtime block
+type RuntimeHistoryBlock struct {
+	Header RuntimeHistoryBlockHeader `cbor:"header"`
+}
+
+// RuntimeHistoryBlockHeader represents a runtime block header
+type RuntimeHistoryBlockHeader struct {
+	Version        uint16 `cbor:"version"`
+	Namespace      []byte `cbor:"namespace"`
+	Round          uint64 `cbor:"round"`
+	Timestamp      uint64 `cbor:"timestamp"`
+	HeaderType     uint8  `cbor:"header_type"`
+	PreviousHash   []byte `cbor:"previous_hash"`
+	IORoot         []byte `cbor:"io_root"`
+	StateRoot      []byte `cbor:"state_root"`
+	MessagesHash   []byte `cbor:"messages_hash"`
+	InMessagesHash []byte `cbor:"in_msgs_hash"`
+}
+
+// RuntimeHistoryRoundResults represents round results in runtime history
+type RuntimeHistoryRoundResults struct {
+	Messages            []RuntimeHistoryMessageEvent `cbor:"messages,omitempty"`
+	GoodComputeEntities [][]byte                     `cbor:"good_compute_entities,omitempty"`
+	BadComputeEntities  [][]byte                     `cbor:"bad_compute_entities,omitempty"`
+}
+
+// RuntimeHistoryMessageEvent represents a message event
+type RuntimeHistoryMessageEvent struct {
+	Module string      `cbor:"module,omitempty"`
+	Code   uint32      `cbor:"code,omitempty"`
+	Index  uint32      `cbor:"index,omitempty"`
+	Result cbor.RawMessage `cbor:"result,omitempty"`
+}
+
 func main() {
 	if len(os.Args) < 3 {
 		fmt.Fprintf(os.Stderr, "Usage: %s <database-type> <path-to-db> [output-json] [max-samples]\n", os.Args[0])
@@ -56,14 +107,14 @@ func main() {
 	dbPath := os.Args[2]
 	jsonFile := ""
 	maxSamples := 1000 // default
-	if len(os.Args) >= 4 {
+	if len(os.Args) > 3 {
 		jsonFile = os.Args[3]
 	}
-	if len(os.Args) >= 5 {
+	if len(os.Args) > 4 {
 		var err error
 		maxSamples, err = strconv.Atoi(os.Args[4])
 		if err != nil || maxSamples <= 0 {
-			log.Fatalf("Invalid max-samples value: %s (must be positive integer)", os.Args[5])
+			log.Fatalf("Invalid max-samples value: %s (must be positive integer)", os.Args[4])
 		}
 	}
 
@@ -110,7 +161,7 @@ func main() {
 		jsonDir := filepath.Dir(jsonFile)
 		err = os.MkdirAll(jsonDir, 0755)
 		if err != nil {
-			log.Fprintf(os.Stderr, "\nWarning: Failed to create directory %s: %v", jsonDir, err)
+			fmt.Fprintf(os.Stderr, "\nWarning: Failed to create directory %s: %v\n", jsonDir, err)
 		} else {
 			err = os.WriteFile(jsonFile, output, 0644)
 			if err != nil {
@@ -168,8 +219,8 @@ func collectSamples(db *DB, stats *DBStats, maxSamples int) error {
 				break
 			}
 
-			// Progress logging every 10 samples
-			if sampleCount > 0 && sampleCount%10 == 0 {
+			// Progress logging every few samples
+			if sampleCount > 0 && sampleCount%1000 == 0 {
 				elapsed := time.Since(startTime)
 				fmt.Fprintf(os.Stderr, "  Progress: %d/%d samples collected (elapsed: %v)\n", sampleCount, maxSamples, elapsed.Round(time.Millisecond))
 			}
@@ -480,19 +531,197 @@ func analyzeKeyConsensusMkvs(key []byte) (string, string) {
 	}
 }
 
-// decodeValueConsensusMkvs decodes MKVS value
+// decodeValueConsensusMkvs decodes consensus MKVS value with inline node parsing
 func decodeValueConsensusMkvs(keyType string, value []byte) string {
 	if len(value) == 0 {
 		return "Empty"
 	}
 
-	switch keyType {
-	case "node":
-		return fmt.Sprintf("Serialized node (size: %d bytes)", len(value))
-	case "write_log", "roots_metadata", "root_updated_nodes", "metadata":
-		return fmt.Sprintf("CBOR-encoded %s (size: %d bytes)", keyType, len(value))
+	if keyType != "node" {
+		return fmt.Sprintf("MKVS %s (size: %d bytes)", keyType, len(value))
+	}
+
+	// Parse MKVS node: 0x00=leaf, 0x01=internal, 0x02=nil
+	switch value[0] {
+	case 0x00: // LeafNode: [2-byte keyLen LE][key][4-byte valueLen LE][value]
+		data := value[1:]
+		if len(data) < 2 {
+			return "LeafNode{<malformed>}"
+		}
+
+		keyLen := int(binary.LittleEndian.Uint16(data[0:2]))
+		data = data[2:]
+		if len(data) < keyLen {
+			return fmt.Sprintf("LeafNode{keyLen=%d, <truncated>}", keyLen)
+		}
+
+		key := data[:keyLen]
+		data = data[keyLen:]
+
+		// Decode consensus module key prefix (roothash, staking, registry, etc.)
+		// Consensus modules use single-byte prefixes from oasis-core/go/consensus/tendermint/apps/*/state/state.go
+		var module string
+		if len(key) == 0 {
+			module = "<empty>"
+		} else {
+			switch key[0] {
+			// Roothash module (0x20-0x29)
+			case 0x20:
+				module = "roothash/runtime_state"
+			case 0x21:
+				module = "roothash/params"
+			case 0x22:
+				module = "roothash/round_timeout"
+			case 0x24:
+				module = "roothash/evidence"
+			case 0x25:
+				module = "roothash/state_root"
+			case 0x26:
+				module = "roothash/io_root"
+			case 0x27:
+				module = "roothash/last_round_results"
+			case 0x28:
+				module = "roothash/incoming_msg_queue_meta"
+			case 0x29:
+				module = "roothash/incoming_msg_queue"
+			// Staking module (0x30-0x3F)
+			case 0x30:
+				module = "staking/total_supply"
+			case 0x31:
+				module = "staking/common_pool"
+			case 0x32:
+				module = "staking/last_block_fees"
+			case 0x33:
+				module = "staking/governance_deposits"
+			case 0x34:
+				module = "staking/accounts"
+			case 0x35:
+				module = "staking/delegations"
+			case 0x36:
+				module = "staking/debonding_delegations"
+			case 0x37:
+				module = "staking/allowances"
+			case 0x38:
+				module = "staking/params"
+			// Registry module (0x40-0x4F)
+			case 0x40:
+				module = "registry/entities"
+			case 0x41:
+				module = "registry/nodes"
+			case 0x42:
+				module = "registry/node_by_consensus"
+			case 0x43:
+				module = "registry/runtimes"
+			case 0x44:
+				module = "registry/suspended_runtimes"
+			case 0x45:
+				module = "registry/params"
+			case 0x46:
+				module = "registry/node_status"
+			// Scheduler module (0x50-0x5F)
+			case 0x50:
+				module = "scheduler/params"
+			case 0x51:
+				module = "scheduler/committees"
+			case 0x52:
+				module = "scheduler/validators"
+			// Governance module (0x60-0x6F)
+			case 0x60:
+				module = "governance/params"
+			case 0x61:
+				module = "governance/proposals"
+			case 0x62:
+				module = "governance/active_proposals"
+			case 0x63:
+				module = "governance/votes"
+			case 0x64:
+				module = "governance/pending_upgrades"
+			// Beacon module (0x70-0x7F)
+			case 0x70:
+				module = "beacon/params"
+			case 0x71:
+				module = "beacon/future_epoch"
+			case 0x72:
+				module = "beacon/epoch"
+			case 0x73:
+				module = "beacon/pvss_state"
+			// Keymanager module (0x80-0x8F)
+			case 0x80:
+				module = "keymanager/status"
+			case 0x81:
+				module = "keymanager/params"
+			// Consensus parameters
+			case 0xF1:
+				module = "consensus/params"
+			default:
+				if key[0] >= 'a' && key[0] <= 'z' {
+					module = extractModuleName(key)
+				} else {
+					module = fmt.Sprintf("0x%02x", key[0])
+				}
+			}
+		}
+
+		if len(data) < 4 {
+			return fmt.Sprintf("LeafNode{module=%s, <no value>}", module)
+		}
+
+		valueLen := int(binary.LittleEndian.Uint32(data[0:4]))
+		data = data[4:]
+		if len(data) < valueLen {
+			return fmt.Sprintf("LeafNode{module=%s, valueLen=%d, <truncated>}", module, valueLen)
+		}
+
+		leafValue := data[:valueLen]
+
+		// Try CBOR decode
+		var decoded interface{}
+		if err := cbor.Unmarshal(leafValue, &decoded); err == nil {
+			return fmt.Sprintf("LeafNode{module=%s, value=%s}", module, formatCBOR(decoded, valueLen))
+		}
+
+		return fmt.Sprintf("LeafNode{module=%s, value=binary(%d bytes)}", module, valueLen)
+
+	case 0x01: // InternalNode: [2-byte labelBits LE][label][leaf/nil marker][hashes]
+		data := value[1:]
+		if len(data) < 2 {
+			return "InternalNode{<malformed>}"
+		}
+
+		labelBits := binary.LittleEndian.Uint16(data[0:2])
+		data = data[2:]
+
+		labelBytes := (int(labelBits) + 7) / 8
+		if len(data) < labelBytes+1 {
+			return fmt.Sprintf("InternalNode{label=%d bits, <truncated>}", labelBits)
+		}
+
+		data = data[labelBytes:] // skip label
+
+		hasLeaf := data[0] == 0x00
+		if hasLeaf {
+			return fmt.Sprintf("InternalNode{label=%d bits, has_leaf=true}", labelBits)
+		}
+
+		data = data[1:] // skip nil marker
+
+		// Extract child hashes
+		var left, right string
+		if len(data) >= 32 {
+			left = truncateHex(data[:32], 16)
+			data = data[32:]
+		}
+		if len(data) >= 32 {
+			right = truncateHex(data[:32], 16)
+		}
+
+		return fmt.Sprintf("InternalNode{label=%d bits, left=%s, right=%s}", labelBits, left, right)
+
+	case 0x02: // NilNode
+		return "NilNode{}"
+
 	default:
-		return fmt.Sprintf("MKVS %s data (size: %d bytes)", keyType, len(value))
+		return fmt.Sprintf("Unknown node prefix 0x%02x (size: %d)", value[0], len(value))
 	}
 }
 
@@ -546,27 +775,310 @@ func decodeValueConsensusState(keyType string, value []byte) string {
 	return fmt.Sprintf("Tendermint %s data (size: %d bytes)", keyType, len(value))
 }
 
-// analyzeKeyRuntimeMkvs parses runtime-mkvs key (same format as consensus-mkvs)
+// analyzeKeyRuntimeMkvs parses runtime-mkvs key
+// Key format: [prefix byte][type byte][data...]
 func analyzeKeyRuntimeMkvs(key []byte) (string, string) {
-	return analyzeKeyConsensusMkvs(key)
+	if len(key) < 1 {
+		return "unknown", fmt.Sprintf("%x", key)
+	}
+
+	// Check for dbVersion prefix (0x01 or 0x05)
+	prefixByte := key[0]
+	var data []byte
+
+	if prefixByte == 0x01 || prefixByte == 0x05 {
+		if len(key) < 2 {
+			return "unknown", fmt.Sprintf("%x", key)
+		}
+		prefixByte = key[1]
+		data = key[2:]
+	} else {
+		data = key[1:]
+	}
+
+	switch prefixByte {
+	case 0x00:
+		return "node", fmt.Sprintf("node{hash: %s}", truncateHex(data, 16))
+	case 0x01:
+		if len(data) >= 8 {
+			version := binary.BigEndian.Uint64(data[0:8])
+			return "write_log", fmt.Sprintf("write_log{v:%d}", version)
+		}
+		return "write_log", "write_log{<malformed>}"
+	case 0x02:
+		if len(data) >= 8 {
+			version := binary.BigEndian.Uint64(data[0:8])
+			return "roots_metadata", fmt.Sprintf("roots_metadata{v:%d}", version)
+		}
+		return "roots_metadata", "roots_metadata{<malformed>}"
+	case 0x03:
+		if len(data) >= 8 {
+			version := binary.BigEndian.Uint64(data[0:8])
+			return "root_updated_nodes", fmt.Sprintf("root_updated_nodes{v:%d}", version)
+		}
+		return "root_updated_nodes", "root_updated_nodes{<malformed>}"
+	case 0x04:
+		return "metadata", "metadata"
+	default:
+		return fmt.Sprintf("unknown_%02x", prefixByte), fmt.Sprintf("%x", key)
+	}
 }
 
-// decodeValueRuntimeMkvs decodes runtime MKVS value (same format as consensus MKVS)
+// decodeValueRuntimeMkvs decodes runtime MKVS value with inline node parsing
 func decodeValueRuntimeMkvs(keyType string, value []byte) string {
-	return decodeValueConsensusMkvs(keyType, value)
+	if len(value) == 0 {
+		return "Empty"
+	}
+
+	if keyType != "node" {
+		return fmt.Sprintf("MKVS %s (size: %d bytes)", keyType, len(value))
+	}
+
+	// Parse MKVS node: 0x00=leaf, 0x01=internal, 0x02=nil
+	switch value[0] {
+	case 0x00: // LeafNode: [2-byte keyLen LE][key][4-byte valueLen LE][value]
+		data := value[1:]
+		if len(data) < 2 {
+			return "LeafNode{<malformed>}"
+		}
+
+		keyLen := int(binary.LittleEndian.Uint16(data[0:2]))
+		data = data[2:]
+		if len(data) < keyLen {
+			return fmt.Sprintf("LeafNode{keyLen=%d, <truncated>}", keyLen)
+		}
+
+		key := data[:keyLen]
+		data = data[keyLen:]
+
+		// Extract module name from key (runtime-specific: evm, contracts, accounts, etc.)
+		module := extractModuleName(key)
+
+		if len(data) < 4 {
+			return fmt.Sprintf("LeafNode{module=%s, <no value>}", module)
+		}
+
+		valueLen := int(binary.LittleEndian.Uint32(data[0:4]))
+		data = data[4:]
+		if len(data) < valueLen {
+			return fmt.Sprintf("LeafNode{module=%s, valueLen=%d, <truncated>}", module, valueLen)
+		}
+
+		leafValue := data[:valueLen]
+
+		// Try CBOR decode
+		var decoded interface{}
+		if err := cbor.Unmarshal(leafValue, &decoded); err == nil {
+			return fmt.Sprintf("LeafNode{module=%s, value=%s}", module, formatCBOR(decoded, valueLen))
+		}
+
+		return fmt.Sprintf("LeafNode{module=%s, value=binary(%d bytes)}", module, valueLen)
+
+	case 0x01: // InternalNode: [2-byte labelBits LE][label][leaf/nil marker][hashes]
+		data := value[1:]
+		if len(data) < 2 {
+			return "InternalNode{<malformed>}"
+		}
+
+		labelBits := binary.LittleEndian.Uint16(data[0:2])
+		data = data[2:]
+
+		labelBytes := (int(labelBits) + 7) / 8
+		if len(data) < labelBytes+1 {
+			return fmt.Sprintf("InternalNode{label=%d bits, <truncated>}", labelBits)
+		}
+
+		data = data[labelBytes:] // skip label
+
+		hasLeaf := data[0] == 0x00
+		if hasLeaf {
+			return fmt.Sprintf("InternalNode{label=%d bits, has_leaf=true}", labelBits)
+		}
+
+		data = data[1:] // skip nil marker
+
+		// Extract child hashes
+		var left, right string
+		if len(data) >= 32 {
+			left = truncateHex(data[:32], 16)
+			data = data[32:]
+		}
+		if len(data) >= 32 {
+			right = truncateHex(data[:32], 16)
+		}
+
+		return fmt.Sprintf("InternalNode{label=%d bits, left=%s, right=%s}", labelBits, left, right)
+
+	case 0x02: // NilNode
+		return "NilNode{}"
+
+	default:
+		return fmt.Sprintf("Unknown node prefix 0x%02x (size: %d)", value[0], len(value))
+	}
 }
 
-// analyzeKeyRuntimeHistory parses runtime-history key (same format as consensus-state)
+// extractModuleName extracts ASCII module name from MKVS key
+func extractModuleName(key []byte) string {
+	if len(key) == 0 {
+		return "<empty>"
+	}
+
+	// Skip leading 0x00 if present
+	if key[0] == 0x00 && len(key) > 1 {
+		key = key[1:]
+	}
+
+	// Find ASCII module name
+	end := 0
+	for i, b := range key {
+		if (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || b == '_' {
+			end = i + 1
+		} else {
+			break
+		}
+	}
+
+	if end > 0 {
+		return string(key[:end])
+	}
+	return truncateHex(key, 16)
+}
+
+// formatCBOR formats decoded CBOR value concisely
+func formatCBOR(v interface{}, rawLen int) string {
+	switch val := v.(type) {
+	case map[interface{}]interface{}:
+		keys := make([]string, 0, len(val))
+		for k := range val {
+			keys = append(keys, fmt.Sprintf("%v", k))
+		}
+		if len(keys) > 3 {
+			return fmt.Sprintf("map{%s, +%d}", strings.Join(keys[:3], ","), len(keys)-3)
+		}
+		return fmt.Sprintf("map{%s}", strings.Join(keys, ","))
+	case []interface{}:
+		return fmt.Sprintf("array[%d]", len(val))
+	case []byte:
+		return fmt.Sprintf("bytes(%d)", len(val))
+	case string:
+		if len(val) > 20 {
+			return fmt.Sprintf("%q...", val[:20])
+		}
+		return fmt.Sprintf("%q", val)
+	case uint64:
+		return fmt.Sprintf("%d", val)
+	case int64:
+		return fmt.Sprintf("%d", val)
+	case bool:
+		return fmt.Sprintf("%v", val)
+	case nil:
+		return "null"
+	default:
+		return fmt.Sprintf("%T(%d bytes)", v, rawLen)
+	}
+}
+
+// analyzeKeyRuntimeHistory parses runtime-history key using binary prefix format
+// Key formats from oasis-core/go/runtime/history/db.go:
+//   - 0x01: metadata key (1 byte)
+//   - 0x02 + uint64: block key (9 bytes) - round number in big-endian
+//   - 0x03 + uint64: round_results key (9 bytes) - round number in big-endian
 func analyzeKeyRuntimeHistory(key []byte) (string, string) {
-	return analyzeKeyConsensusState(key)
+	if len(key) == 0 {
+		return "unknown", ""
+	}
+
+	switch key[0] {
+	case 0x01:
+		// Metadata key - just the prefix byte
+		if len(key) == 1 {
+			return "metadata", "metadata"
+		}
+		// Unexpected extra data after metadata prefix
+		return "metadata", fmt.Sprintf("metadata (extra: %x)", key[1:])
+
+	case 0x02:
+		// Block key - prefix + 8-byte round number
+		if len(key) == 9 {
+			round := binary.BigEndian.Uint64(key[1:9])
+			return "block", fmt.Sprintf("round:%d", round)
+		}
+		return "block", fmt.Sprintf("block (malformed, len=%d)", len(key))
+
+	case 0x03:
+		// Round results key - prefix + 8-byte round number
+		if len(key) == 9 {
+			round := binary.BigEndian.Uint64(key[1:9])
+			return "round_results", fmt.Sprintf("round:%d", round)
+		}
+		return "round_results", fmt.Sprintf("round_results (malformed, len=%d)", len(key))
+
+	default:
+		return "unknown", fmt.Sprintf("%x", key)
+	}
 }
 
-// decodeValueRuntimeHistory decodes runtime history value
+// decodeValueRuntimeHistory decodes CBOR-encoded runtime history value
 func decodeValueRuntimeHistory(keyType string, value []byte) string {
 	if len(value) == 0 {
 		return "Empty"
 	}
-	return fmt.Sprintf("Runtime %s data (size: %d bytes)", keyType, len(value))
+
+	switch keyType {
+	case "metadata":
+		var meta RuntimeHistoryMetadata
+		if err := cbor.Unmarshal(value, &meta); err != nil {
+			return fmt.Sprintf("Failed to decode metadata: %v (size: %d)", err, len(value))
+		}
+		runtimeID := truncateHex(meta.RuntimeID, 16)
+		return fmt.Sprintf("Metadata{version: %d, runtime_id: %s..., last_round: %d, last_consensus_height: %d}",
+			meta.Version, runtimeID, meta.LastRound, meta.LastConsensusHeight)
+
+	case "block":
+		var block RuntimeHistoryAnnotatedBlock
+		if err := cbor.Unmarshal(value, &block); err != nil {
+			return fmt.Sprintf("Failed to decode block: %v (size: %d)", err, len(value))
+		}
+		if block.Block == nil {
+			return fmt.Sprintf("AnnotatedBlock{consensus_height: %d, block: nil}", block.Height)
+		}
+		h := block.Block.Header
+		// Format timestamp as human-readable
+		ts := time.Unix(int64(h.Timestamp), 0).UTC().Format(time.RFC3339)
+		headerType := headerTypeName(h.HeaderType)
+		stateRoot := truncateHex(h.StateRoot, 16)
+		return fmt.Sprintf("AnnotatedBlock{consensus_height: %d, round: %d, timestamp: %s, header_type: %s, state_root: %s...}",
+			block.Height, h.Round, ts, headerType, stateRoot)
+
+	case "round_results":
+		var results RuntimeHistoryRoundResults
+		if err := cbor.Unmarshal(value, &results); err != nil {
+			return fmt.Sprintf("Failed to decode round_results: %v (size: %d)", err, len(value))
+		}
+		return fmt.Sprintf("RoundResults{messages: %d, good_entities: %d, bad_entities: %d}",
+			len(results.Messages), len(results.GoodComputeEntities), len(results.BadComputeEntities))
+
+	default:
+		return fmt.Sprintf("Runtime %s data (size: %d bytes)", keyType, len(value))
+	}
+}
+
+// headerTypeName converts header type byte to string
+func headerTypeName(headerType uint8) string {
+	switch headerType {
+	case 0:
+		return "Invalid"
+	case 1:
+		return "Normal"
+	case 2:
+		return "RoundFailed"
+	case 3:
+		return "EpochTransition"
+	case 4:
+		return "Suspended"
+	default:
+		return fmt.Sprintf("Unknown(%d)", headerType)
+	}
 }
 
 // isPrintableASCII checks if a string contains only printable ASCII characters

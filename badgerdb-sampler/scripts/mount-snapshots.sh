@@ -1,5 +1,12 @@
 #!/bin/bash
 # Script to mount .tar.zst snapshot archives without extracting
+#
+#   ./mount-snapshots.sh testnet
+#
+# Manually:
+#   ./ratarmount -o allow_other,uid=1000,gid=1000 -w "testnet/20220303-20231012/cipher_testnet.overlay" "testnet/20220303-20231012/cipher_testnet.tar.zst" "testnet/20220303-20231012/cipher_testnet.mount"
+#   fusermount -u "testnet/20220303-20231012/cipher_testnet.mount" && rm -rf "testnet/20220303-20231012/cipher_testnet.mount" "testnet/20220303-20231012/cipher_testnet.overlay"
+#
 set -euo pipefail
 
 cd "$(dirname "$0")"

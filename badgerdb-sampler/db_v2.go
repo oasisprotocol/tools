@@ -61,7 +61,7 @@ func openDatabase(path string) (*DB, error) {
 	opts.ReadOnly = false
 	opts.SyncWrites = false
 	opts.NumMemtables = 1          // Minimize memtable usage
-	opts.MemTableSize = 1 << 20    // 1MB memtable (minimal)
+	opts.MaxTableSize = 1 << 20    // 1MB table size (minimal)
 	opts.ValueThreshold = 1 << 17  // 128KB - must be less than max batch size (~157KB with 1MB memtable)
 	opts.NumLevelZeroTables = 100
 	opts.NumLevelZeroTablesStall = 200

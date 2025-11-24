@@ -58,6 +58,21 @@ type RuntimeHistoryMessageEvent struct {
 	Result cbor.RawMessage `cbor:"result,omitempty"`
 }
 
+// RuntimeInputArtifacts represents input transaction artifacts stored in IO tree
+// From oasis-core/go/runtime/transaction/transaction.go
+type RuntimeInputArtifacts struct {
+	_          struct{} `cbor:",toarray"`
+	Input      []byte
+	BatchOrder uint32
+}
+
+// RuntimeOutputArtifacts represents output transaction artifacts stored in IO tree
+// From oasis-core/go/runtime/transaction/transaction.go
+type RuntimeOutputArtifacts struct {
+	_      struct{} `cbor:",toarray"`
+	Output []byte
+}
+
 // decodeKeyRuntimeMkvs parses runtime-mkvs key
 // Key format: [prefix byte][type byte][data...]
 func decodeKeyRuntimeMkvs(key []byte) (string, string) {
@@ -84,20 +99,20 @@ func decodeKeyRuntimeMkvs(key []byte) (string, string) {
 		return "node", fmt.Sprintf("node{hash: %s}", truncateHex(data, 16))
 	case 0x01:
 		if len(data) >= 8 {
-			version := binary.BigEndian.Uint64(data[0:8])
-			return "write_log", fmt.Sprintf("write_log{v:%d}", version)
+			height := binary.BigEndian.Uint64(data[0:8])
+			return "write_log", fmt.Sprintf("write_log{height:%d}", height)
 		}
 		return "write_log", "write_log{<malformed>}"
 	case 0x02:
 		if len(data) >= 8 {
-			version := binary.BigEndian.Uint64(data[0:8])
-			return "roots_metadata", fmt.Sprintf("roots_metadata{v:%d}", version)
+			height := binary.BigEndian.Uint64(data[0:8])
+			return "roots_metadata", fmt.Sprintf("roots_metadata{height:%d}", height)
 		}
 		return "roots_metadata", "roots_metadata{<malformed>}"
 	case 0x03:
 		if len(data) >= 8 {
-			version := binary.BigEndian.Uint64(data[0:8])
-			return "root_updated_nodes", fmt.Sprintf("root_updated_nodes{v:%d}", version)
+			height := binary.BigEndian.Uint64(data[0:8])
+			return "root_updated_nodes", fmt.Sprintf("root_updated_nodes{height:%d}", height)
 		}
 		return "root_updated_nodes", "root_updated_nodes{<malformed>}"
 	case 0x04:
@@ -149,13 +164,9 @@ func decodeValueRuntimeMkvs(keyType string, value []byte) string {
 
 		leafValue := data[:valueLen]
 
-		// Try CBOR decode
-		var decoded interface{}
-		if err := cbor.Unmarshal(leafValue, &decoded); err == nil {
-			return fmt.Sprintf("LeafNode{module=%s, value=%s}", module, formatCBOR(decoded, valueLen))
-		}
-
-		return fmt.Sprintf("LeafNode{module=%s, value=binary(%d bytes)}", module, valueLen)
+		// Try to decode based on module type
+		valueDesc := decodeLeafValue(module, key, leafValue)
+		return fmt.Sprintf("LeafNode{module=%s, value=%s}", module, valueDesc)
 
 	case 0x01: // InternalNode: [2-byte labelBits LE][label][leaf/nil marker][hashes]
 		data := value[1:]
@@ -301,4 +312,46 @@ func headerTypeName(headerType uint8) string {
 	default:
 		return fmt.Sprintf("Unknown(%d)", headerType)
 	}
+}
+
+// decodeLeafValue decodes MKVS leaf value based on module type
+func decodeLeafValue(module string, key []byte, value []byte) string {
+	// Check for IO transaction artifacts
+	if len(module) > 5 && module[:5] == "io_tx" {
+		// Determine artifact kind from key
+		if len(key) >= 34 {
+			kind := key[33]
+			if kind == 1 {
+				// Input artifact
+				var ia RuntimeInputArtifacts
+				if err := cbor.Unmarshal(value, &ia); err == nil {
+					return fmt.Sprintf("RuntimeInputArtifacts{input_size=%d, batch_order=%d}", len(ia.Input), ia.BatchOrder)
+				}
+			} else if kind == 2 {
+				// Output artifact
+				var oa RuntimeOutputArtifacts
+				if err := cbor.Unmarshal(value, &oa); err == nil {
+					return fmt.Sprintf("RuntimeOutputArtifacts{output_size=%d}", len(oa.Output))
+				}
+			}
+		}
+	}
+
+	// Check for IO event tags
+	if len(module) > 8 && module[:8] == "io_event" {
+		// Event tag value is typically CBOR
+		var decoded interface{}
+		if err := cbor.Unmarshal(value, &decoded); err == nil {
+			return fmt.Sprintf("event_value=%s", formatCBOR(decoded, len(value)))
+		}
+		return fmt.Sprintf("event_value=binary(%d bytes)", len(value))
+	}
+
+	// Try CBOR decode for regular state keys
+	var decoded interface{}
+	if err := cbor.Unmarshal(value, &decoded); err == nil {
+		return formatCBOR(decoded, len(value))
+	}
+
+	return fmt.Sprintf("binary(%d bytes)", len(value))
 }

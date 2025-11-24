@@ -192,14 +192,6 @@ func isPrintableASCII(s string) bool {
 	return true
 }
 
-// truncateBytes returns first n bytes or all bytes if shorter
-func truncateBytes(data []byte, n int) []byte {
-	if len(data) <= n {
-		return data
-	}
-	return data[:n]
-}
-
 // truncateHex converts bytes to hex and truncates if too long
 func truncateHex(data []byte, maxLen int) string {
 	hex := fmt.Sprintf("%x", data)
@@ -208,3 +200,4 @@ func truncateHex(data []byte, maxLen int) string {
 	}
 	return hex
 }
+

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math/big"
 	"strings"
 )
 
@@ -199,5 +200,14 @@ func truncateHex(data []byte, maxLen int) string {
 		return hex[:maxLen] + "..."
 	}
 	return hex
+}
+
+// formatU256 converts big-endian U256 bytes to decimal string.
+func formatU256(b []byte) string {
+	if len(b) == 0 {
+		return "0"
+	}
+	n := new(big.Int).SetBytes(b)
+	return n.String()
 }
 

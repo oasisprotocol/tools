@@ -260,7 +260,7 @@ func decodeValueRuntimeHistory(keyType string, value []byte) RuntimeHistoryValue
 		}
 		info.Metadata = &RuntimeHistoryMetadataInfo{
 			Version:             meta.Version,
-			RuntimeID:           truncateHex(meta.RuntimeID, 16),
+			RuntimeID:           fmt.Sprintf("%x", meta.RuntimeID),
 			LastRound:           meta.LastRound,
 			LastConsensusHeight: meta.LastConsensusHeight,
 		}
@@ -354,27 +354,31 @@ func decodeLeafValue(module string, key []byte, value []byte) *RuntimeLeafValueI
 			kind := key[33]
 			if kind == 1 {
 				// Input artifact
-				var ia RuntimeInputArtifacts
-				if err := cbor.Unmarshal(value, &ia); err == nil {
-					info.ValueType = "io_input"
-					info.InputSize = len(ia.Input)
-					info.BatchOrder = ia.BatchOrder
-					return info
-				}
+				info.ValueType = "io_input"
+				info.EVMTxInput = decodeEVMTxInput(key, value)
+				return info
 			} else if kind == 2 {
 				// Output artifact
-				var oa RuntimeOutputArtifacts
-				if err := cbor.Unmarshal(value, &oa); err == nil {
-					info.ValueType = "io_output"
-					info.OutputSize = len(oa.Output)
-					return info
-				}
+				info.ValueType = "io_output"
+				info.EVMTxOutput = decodeEVMTxOutput(value)
+				return info
 			}
 		}
 	}
 
 	// Check for IO event tags
 	if len(module) > 8 && module[:8] == "io_event" {
+		// Special handling for EVM events
+		if len(module) >= 12 && module[9:12] == "evm" {
+			evmEvent := decodeEVMEvent(value)
+			if evmEvent != nil {
+				info.ValueType = "evm_event"
+				info.EVMEvent = evmEvent
+				return info
+			}
+		}
+
+		// Generic event decoding for non-EVM events
 		var decoded interface{}
 		if err := cbor.Unmarshal(value, &decoded); err == nil {
 			info.ValueType = "io_event"
@@ -397,95 +401,4 @@ func decodeLeafValue(module string, key []byte, value []byte) *RuntimeLeafValueI
 	info.ValueType = "binary"
 	info.BinarySize = len(value)
 	return info
-}
-
-// decodeEVMData decodes EVM module storage data.
-// See: _oasis-sdk/runtime-sdk/modules/evm/src/state.rs
-func decodeEVMData(module string, key []byte, value []byte) *EVMDataInfo {
-	// Module format: "evm:subtype" where subtype is extracted from key prefix
-	// The full key after module name starts with the storage type prefix
-
-	// Find where module name ends in the key
-	moduleNameEnd := 0
-	for i, b := range key {
-		if (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || b == '_' {
-			moduleNameEnd = i + 1
-		} else {
-			break
-		}
-	}
-
-	if moduleNameEnd >= len(key) {
-		return nil // No data after module name
-	}
-
-	subKey := key[moduleNameEnd:]
-	if len(subKey) < 1 {
-		return nil
-	}
-
-	evmInfo := &EVMDataInfo{}
-	storagePrefix := subKey[0]
-	data := subKey[1:]
-
-	switch storagePrefix {
-	case 0x01: // CODES: evm + 0x01 + H160 (address)
-		evmInfo.StorageType = "code"
-		if len(data) >= 20 {
-			evmInfo.Address = fmt.Sprintf("%x", data[:20])
-			data = data[20:]
-		}
-		// Value is contract bytecode
-		evmInfo.CodeSize = len(value)
-		if len(value) > 0 {
-			previewLen := 32
-			if len(value) < previewLen {
-				previewLen = len(value)
-			}
-			evmInfo.CodePreview = fmt.Sprintf("%x", value[:previewLen])
-		}
-
-	case 0x02: // STORAGES: evm + 0x02 + H160 (address) + H256 (slot)
-		evmInfo.StorageType = "storage"
-		if len(data) >= 20 {
-			evmInfo.Address = fmt.Sprintf("%x", data[:20])
-			data = data[20:]
-			if len(data) >= 32 {
-				evmInfo.StorageSlot = fmt.Sprintf("%x", data[:32])
-			}
-		}
-		// Value is H256 storage value
-		if len(value) == 32 {
-			evmInfo.StorageValue = fmt.Sprintf("%x", value)
-		}
-
-	case 0x03: // BLOCK_HASHES: evm + 0x03 + Round (uint64 BE)
-		evmInfo.StorageType = "block_hash"
-		if len(data) >= 8 {
-			evmInfo.Round = binary.BigEndian.Uint64(data[:8])
-		}
-		// Value is H256 block hash
-		if len(value) == 32 {
-			evmInfo.BlockHash = fmt.Sprintf("%x", value)
-		}
-
-	case 0x04: // CONFIDENTIAL_STORAGES: evm + 0x04 + H160 (address) + H256 (slot)
-		evmInfo.StorageType = "confidential_storage"
-		if len(data) >= 20 {
-			evmInfo.Address = fmt.Sprintf("%x", data[:20])
-			data = data[20:]
-			if len(data) >= 32 {
-				evmInfo.StorageSlot = fmt.Sprintf("%x", data[:32])
-			}
-		}
-		// Value is encrypted - we can only show size
-		if len(value) > 0 {
-			evmInfo.StorageValue = fmt.Sprintf("<encrypted:%d bytes>", len(value))
-		}
-
-	default:
-		return nil // Unknown EVM storage type
-	}
-
-	return evmInfo
 }

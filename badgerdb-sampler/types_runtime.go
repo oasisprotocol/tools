@@ -172,24 +172,14 @@ type RuntimeHistoryRoundResultsInfo struct {
 // RuntimeLeafValueInfo represents a decoded MKVS leaf node value.
 // See: _oasis-core/go/runtime/transaction/transaction.go:129-150 (artifacts)
 type RuntimeLeafValueInfo struct {
-	ValueType    string      `json:"value_type"` // "io_input", "io_output", "io_event", "evm_code", "evm_storage", "evm_block_hash", "cbor", "binary"
-	InputSize    int         `json:"input_size,omitempty"`
-	BatchOrder   uint32      `json:"batch_order,omitempty"`
-	OutputSize   int         `json:"output_size,omitempty"`
-	DecodedValue interface{} `json:"decoded_value,omitempty"` // For CBOR/event values
-	BinarySize   int         `json:"binary_size,omitempty"`   // For binary values
-	EVM          *EVMDataInfo `json:"evm,omitempty"`           // For EVM-specific data
-}
-
-// EVMDataInfo represents decoded EVM storage data.
-// See: _oasis-sdk/runtime-sdk/modules/evm/src/state.rs
-type EVMDataInfo struct {
-	StorageType string `json:"storage_type"` // "code", "storage", "block_hash", "confidential_storage"
-	Address     string `json:"address,omitempty"` // H160 (20 bytes) - contract address (hex)
-	StorageSlot string `json:"storage_slot,omitempty"` // H256 (32 bytes) - storage slot (hex)
-	StorageValue string `json:"storage_value,omitempty"` // H256 (32 bytes) - storage value (hex)
-	Round       uint64 `json:"round,omitempty"` // For block_hash type
-	BlockHash   string `json:"block_hash,omitempty"` // H256 (32 bytes) - block hash (hex)
-	CodeSize    int    `json:"code_size,omitempty"` // Size of contract bytecode
-	CodePreview string `json:"code_preview,omitempty"` // First few bytes of bytecode (hex)
+	ValueType    string            `json:"value_type"` // "io_input", "io_output", "io_event", "evm_event", "evm_code", "evm_storage", "evm_block_hash", "cbor", "binary"
+	InputSize    int               `json:"input_size,omitempty"`
+	BatchOrder   uint32            `json:"batch_order,omitempty"`
+	OutputSize   int               `json:"output_size,omitempty"`
+	DecodedValue interface{}       `json:"decoded_value,omitempty"` // For CBOR/event values
+	BinarySize   int               `json:"binary_size,omitempty"`   // For binary values
+	EVM          *EVMDataInfo      `json:"evm,omitempty"`           // For EVM-specific data
+	EVMEvent     *EVMEventInfo     `json:"evm_event,omitempty"`     // For EVM event data
+	EVMTxInput   *EVMTxInputInfo   `json:"evm_tx_input,omitempty"`  // For EVM transaction input
+	EVMTxOutput  *EVMTxOutputInfo  `json:"evm_tx_output,omitempty"` // For EVM transaction output
 }

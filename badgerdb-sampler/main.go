@@ -16,14 +16,16 @@ var BadgerVersion string
 
 // Sample contains both raw and decoded key/value information
 type Sample struct {
-	RawKey       string      `json:"raw_key"`
-	RawKeySize   int         `json:"raw_key_size"`
-	KeyType      string      `json:"key_type"`
-	DecodedKey   interface{} `json:"decoded_key"`
-	RawValue     string      `json:"raw_value"`
-	RawValueSize int         `json:"raw_value_size"`
-	DecodedValue interface{} `json:"decoded_value"`
-	Timestamp    int64       `json:"timestamp,omitempty"`
+	KeyRaw    string      `json:"key_raw"`
+	KeySize   int         `json:"key_size"`
+	KeyType   string      `json:"key_type"`
+	Key       interface{} `json:"key"`                   // Decoded key (renamed from Key)
+	KeyError  string      `json:"key_error,omitempty"`   // Error decoding key
+	ValueRaw  string      `json:"value_raw"`
+	ValueSize int         `json:"value_size"`
+	Value     interface{} `json:"value"`                 // Decoded value (renamed from Value)
+	ValueError string     `json:"value_error,omitempty"` // Error decoding value
+	Timestamp int64       `json:"timestamp,omitempty"`
 }
 
 // DBStats contains database statistics and samples
@@ -172,67 +174,69 @@ func collectSamples(db *DB, stats *DBStats, maxSamples int) error {
 			key := item.Key()
 
 			sample := Sample{
-				RawKey:     fmt.Sprintf("%x", key),
-				RawKeySize: len(key),
+				KeyRaw:     truncateHex(key, TruncateLongSize),
+				KeySize:    len(key),
 				KeyType:    "unknown",
-				DecodedKey: nil,
+				Key: nil,
 			}
 
 			// Decode key based on database type
 			switch stats.DatabaseType {
 			case "consensus-blockstore":
-				keyInfo := decodeKeyConsensusBlockstore(key)
+				keyInfo := decodeConsensusBlockstoreKey(key)
 				sample.KeyType = keyInfo.KeyType
-				sample.DecodedKey = keyInfo
+				sample.Key = keyInfo
 			case "consensus-evidence":
-				keyInfo := decodeKeyConsensusEvidence(key)
+				keyInfo := decodeConsensusEvidenceKey(key)
 				sample.KeyType = keyInfo.KeyType
-				sample.DecodedKey = keyInfo
+				sample.Key = keyInfo
 			case "consensus-mkvs":
-				keyInfo := decodeKeyConsensusMkvs(key)
+				keyInfo := decodeConsensusMkvsKey(key)
 				sample.KeyType = keyInfo.KeyType
-				sample.DecodedKey = keyInfo
+				sample.Key = keyInfo
 			case "consensus-state":
-				keyInfo := decodeKeyConsensusState(key)
+				keyInfo := decodeConsensusStateKey(key)
 				sample.KeyType = keyInfo.KeyType
-				sample.DecodedKey = keyInfo
+				sample.Key = keyInfo
 			case "runtime-mkvs":
-				keyInfo := decodeKeyRuntimeMkvs(key)
+				keyInfo := decodeRuntimeMkvsKey(key)
 				sample.KeyType = keyInfo.KeyType
-				sample.DecodedKey = keyInfo
+				sample.Key = keyInfo
 			case "runtime-history":
-				keyInfo := decodeKeyRuntimeHistory(key)
+				keyInfo := decodeRuntimeHistoryKey(key)
 				sample.KeyType = keyInfo.KeyType
-				sample.DecodedKey = keyInfo
+				sample.Key = keyInfo
 			}
 
 			// Fetch and decode value
 			err := item.Value(func(val []byte) error {
-				sample.RawValueSize = len(val)
-				sample.RawValue = truncateHex(val, 200)
-				sample.DecodedValue = nil
+				sample.ValueSize = len(val)
+				sample.ValueRaw = truncateHex(val, TruncateLongSize)
+				sample.Value = nil
 
 				// Decode value based on database type
 				switch stats.DatabaseType {
 				case "consensus-blockstore":
-					valueInfo := decodeValueConsensusBlockstore(sample.KeyType, val)
-					sample.DecodedValue = valueInfo
+					valueInfo := decodeConsensusBlockstoreValue(sample.KeyType, val)
+					sample.Value = valueInfo
 					sample.Timestamp = valueInfo.Timestamp
 				case "consensus-evidence":
-					sample.DecodedValue = decodeValueConsensusEvidence(sample.KeyType, val)
+					value, err := decodeConsensusEvidenceValue(sample.KeyType, val)
+					sample.Value = value
+					sample.ValueError = err
 				case "consensus-mkvs":
-					sample.DecodedValue = decodeValueConsensusMkvs(sample.KeyType, val)
+					sample.Value = decodeConsensusMkvsValue(sample.KeyType, val)
 				case "consensus-state":
-					sample.DecodedValue = decodeValueConsensusState(sample.KeyType, val)
+					sample.Value = decodeConsensusStateValue(sample.KeyType, val)
 				case "runtime-mkvs":
-					sample.DecodedValue = decodeValueRuntimeMkvs(sample.KeyType, val)
+					sample.Value = decodeRuntimeMkvsValue(sample.KeyType, val)
 				case "runtime-history":
-					sample.DecodedValue = decodeValueRuntimeHistory(sample.KeyType, val)
+					sample.Value = decodeRuntimeHistoryValue(sample.KeyType, val)
 				}
 				return nil
 			})
 			if err != nil {
-				log.Printf("Error reading value for key %s: %v", sample.RawKey, err)
+				log.Printf("Error reading value for key %s: %v", sample.KeyRaw, err)
 			}
 
 			stats.Samples = append(stats.Samples, sample)

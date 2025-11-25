@@ -1,6 +1,10 @@
 package main
 
-import "time"
+import (
+	"time"
+
+	"github.com/fxamacker/cbor/v2"
+)
 
 // Consensus decode output types - structured representations of decoded consensus database entries.
 // These types separate decoding logic from string formatting, enabling flexible output formats.
@@ -16,22 +20,24 @@ type ConsensusBlockstoreKeyInfo struct {
 	ConsensusHeight int64  `json:"consensus_height,omitempty"`  // For H:, C:, SC:, P: keys
 	PartIndex       int    `json:"part_index,omitempty"`        // For P: keys
 	Hash            string `json:"hash,omitempty"`              // For BH: keys
-	RawKey          string `json:"raw_key,omitempty"`           // Original ASCII key
+	KeySize         int    `json:"key_size"`
+	KeyRaw          string `json:"key_raw,omitempty"`           // Original ASCII key
 }
 
 // ConsensusBlockstoreValueInfo represents a decoded consensus-blockstore value.
 // See: tendermint/proto/tendermint/store/types.proto (BlockStoreState)
 // See: tendermint/proto/tendermint/types/types.proto (BlockMeta, Part, Commit)
 type ConsensusBlockstoreValueInfo struct {
-	KeyType     string                     `json:"key_type"`
-	Size        int                        `json:"size"`
-	Timestamp   int64                      `json:"timestamp,omitempty"` // Unix timestamp from block meta
-	State       *ConsensusBlockStoreState  `json:"state,omitempty"`
-	BlockMeta   *ConsensusBlockMetaInfo    `json:"block_meta,omitempty"`
-	Part        *ConsensusPartInfo         `json:"part,omitempty"`
-	Commit      *ConsensusCommitInfo       `json:"commit,omitempty"`
-	HashHeight  int64                      `json:"hash_height,omitempty"` // For block_hash type
-	DecodeError string                     `json:"decode_error,omitempty"`
+	Timestamp      int64                     `json:"timestamp,omitempty"` // Unix timestamp from block meta
+	State          *ConsensusBlockStoreState `json:"state,omitempty"`
+	StateError     string                    `json:"state_error,omitempty"` // Error decoding state
+	BlockMeta      *ConsensusBlockMetaInfo   `json:"block_meta,omitempty"`
+	BlockMetaError string                    `json:"block_meta_error,omitempty"` // Error decoding block meta
+	Part           *ConsensusPartInfo        `json:"part,omitempty"`
+	PartError      string                    `json:"part_error,omitempty"` // Error decoding part
+	Commit         *ConsensusCommitInfo      `json:"commit,omitempty"`
+	CommitError    string                    `json:"commit_error,omitempty"` // Error decoding commit
+	HashHeight     int64                     `json:"hash_height,omitempty"` // For block_hash type
 }
 
 // ConsensusBlockStoreState represents BlockStoreState from tendermint.
@@ -55,7 +61,7 @@ type ConsensusBlockMetaInfo struct {
 // See: tendermint/proto/tendermint/types/types.proto (Part message)
 type ConsensusPartInfo struct {
 	Index      uint32 `json:"index"`
-	BytesSize  int    `json:"bytes_size"`
+	PartSize   int    `json:"part_size"`
 	ProofTotal int64  `json:"proof_total"`
 }
 
@@ -76,21 +82,21 @@ type ConsensusCommitInfo struct {
 type ConsensusEvidenceKeyInfo struct {
 	KeyType    string `json:"key_type"`
 	PrefixByte byte   `json:"prefix_byte,omitempty"`
-	RawKey     string `json:"raw_key,omitempty"` // hex
+	KeySize    int    `json:"key_size"`
+	KeyHex     string `json:"key_hex,omitempty"` // hex
 }
 
 // ConsensusEvidenceValueInfo represents a decoded consensus-evidence value.
 // See: tendermint/proto/tendermint/types/evidence.proto (DuplicateVoteEvidence)
 type ConsensusEvidenceValueInfo struct {
-	Size            int    `json:"size"`
-	VoteAHeight     int64  `json:"vote_a_height,omitempty"`
-	VoteBHeight     int64  `json:"vote_b_height,omitempty"`
-	EvidenceType    string `json:"evidence_type,omitempty"`      // "duplicate_vote", "light_client_attack", "unknown"
-	TotalVotingPower int64 `json:"total_voting_power,omitempty"`
-	ValidatorPower  int64  `json:"validator_power,omitempty"`
-	Timestamp       string `json:"timestamp,omitempty"`          // RFC3339 format
-	RawValue        string `json:"raw_value,omitempty"`          // First 32 hex bytes if decode fails
-	DecodeError     string `json:"decode_error,omitempty"`
+	ValueSize        int    `json:"value_size"`
+	ValueHex         string `json:"value_hex,omitempty"`          // Truncated hex dump
+	VoteAHeight      int64  `json:"vote_a_height,omitempty"`
+	VoteBHeight      int64  `json:"vote_b_height,omitempty"`
+	EvidenceType     string `json:"evidence_type,omitempty"`      // "duplicate_vote", "light_client_attack", "unknown"
+	TotalVotingPower int64  `json:"total_voting_power,omitempty"`
+	ValidatorPower   int64  `json:"validator_power,omitempty"`
+	Timestamp        string `json:"timestamp,omitempty"`          // RFC3339 format
 }
 
 // =============================================================================
@@ -100,21 +106,25 @@ type ConsensusEvidenceValueInfo struct {
 // ConsensusMkvsKeyInfo represents a decoded consensus-mkvs key.
 // See: _oasis-core/go/storage/mkvs/db/badger/badger.go:31-66
 type ConsensusMkvsKeyInfo struct {
+	KeySize         int    `json:"key_size"`
+	KeyHex          string `json:"key_hex,omitempty"`          // hex, truncated
 	KeyType         string `json:"key_type"`                   // "node", "write_log", "roots_metadata", "root_updated_nodes", "metadata", "multipart_restore_log", "root_node", "unknown"
 	ConsensusHeight uint64 `json:"consensus_height,omitempty"` // For write_log, roots_metadata, root_updated_nodes
-	Hash            string `json:"hash,omitempty"`             // hex, truncated
+	Hash            string `json:"hash,omitempty"`             // hex, truncated (partial key data)
 	RootType        byte   `json:"root_type,omitempty"`
-	DecodeError     string `json:"decode_error,omitempty"`
 }
 
-// ConsensusMkvsNodeInfo represents a decoded consensus-mkvs value (node).
+// ConsensusMkvsValueInfo represents a decoded consensus-mkvs value (node).
 // See: _oasis-core/go/storage/mkvs/node/node.go:26-32 (prefixes), 294-309 (InternalNode), 531-537 (LeafNode)
-type ConsensusMkvsNodeInfo struct {
-	NodeType    string                     `json:"node_type"` // "leaf", "internal", "nil", "non_node", "unknown"
-	Size        int                        `json:"size"`
-	Leaf        *ConsensusMkvsLeafInfo     `json:"leaf,omitempty"`
-	Internal    *ConsensusMkvsInternalInfo `json:"internal,omitempty"`
-	DecodeError string                     `json:"decode_error,omitempty"`
+type ConsensusMkvsValueInfo struct {
+	NodeType      string                     `json:"node_type"` // "leaf", "internal", "nil", "non_node", "unknown"
+	NodeSize      int                        `json:"node_size"` // Total MKVS node size
+	NodeHex       string                     `json:"node_hex,omitempty"` // Raw node dump (hex, truncated)
+	Leaf          *ConsensusMkvsLeafInfo     `json:"leaf,omitempty"`
+	LeafError     string                     `json:"leaf_error,omitempty"` // Error decoding leaf node
+	Internal      *ConsensusMkvsInternalInfo `json:"internal,omitempty"`
+	InternalError string                     `json:"internal_error,omitempty"` // Error decoding internal node
+	NodeError     string                     `json:"node_error,omitempty"` // Structural parsing error
 }
 
 // ConsensusMkvsLeafInfo represents a decoded MKVS LeafNode for consensus.
@@ -122,11 +132,12 @@ type ConsensusMkvsNodeInfo struct {
 // See: _oasis-core/go/consensus/tendermint/apps/*/state/state.go (module prefixes)
 type ConsensusMkvsLeafInfo struct {
 	Module       string      `json:"module"`
-	KeyLen       int         `json:"key_len"`
-	Key          string      `json:"key,omitempty"`           // hex, truncated
+	KeySize      int         `json:"key_size"`
+	KeyHex       string      `json:"key_hex,omitempty"`       // hex, truncated
 	OasisAddress string      `json:"oasis_address,omitempty"` // bech32 oasis1... address if applicable
-	ValueLen     int         `json:"value_len"`
-	DecodedValue interface{} `json:"decoded_value,omitempty"` // CBOR decoded or size info
+	ValueSize    int         `json:"value_size"`
+	ValueHex     string      `json:"value_hex,omitempty"`     // hex, truncated
+	ValueFormatted interface{} `json:"value_formatted,omitempty"` // CBOR formatted output from formatCBOR()
 }
 
 // ConsensusMkvsInternalInfo represents a decoded MKVS InternalNode.
@@ -146,7 +157,8 @@ type ConsensusMkvsInternalInfo struct {
 // See: tendermint/state/store.go for key formats (abciResponsesKey, validatorsKey, etc.)
 type ConsensusStateKeyInfo struct {
 	KeyType         string `json:"key_type"`                    // "abci_responses", "consensus_params", "validators", "state", "genesis", "text_key", "binary", "unknown"
-	DecodedKey      string `json:"decoded_key,omitempty"`
+	KeySize         int    `json:"key_size"`
+	KeyHex          string `json:"key_hex,omitempty"`           // hex, truncated
 	ConsensusHeight int64  `json:"consensus_height,omitempty"`  // For abci_responses (extracted from key)
 	IsBinary        bool   `json:"is_binary,omitempty"`
 }
@@ -154,19 +166,21 @@ type ConsensusStateKeyInfo struct {
 // ConsensusStateValueInfo represents a decoded consensus-state value.
 // See: tendermint/proto/tendermint/state/types.proto (various state types)
 type ConsensusStateValueInfo struct {
-	KeyType             string              `json:"key_type"`
-	Size                int                 `json:"size"`
-	ABCIInfo            *ABCIResponseInfo   `json:"abci_info,omitempty"`            // For abci_responses
-	ConsensusParams     *tmConsensusParams  `json:"consensus_params,omitempty"`     // For consensus_params
-	ConsensusValidators *tmValidatorSet     `json:"consensus_validators,omitempty"` // For validators
-	ConsensusState      *tmState            `json:"consensus_state,omitempty"`      // For state
-	RawValue            string              `json:"raw_value,omitempty"`            // Raw hex dump
-	DecodeError         string              `json:"decode_error,omitempty"`
+	ValueSize           int                `json:"value_size"`
+	ValueHex            string             `json:"value_hex,omitempty"` // Raw hex dump
+	ABCIResponse        *ConsensusABCIResponseInfo  `json:"abci_response,omitempty"` // For abci_responses
+	ABCIResponseError   string             `json:"abci_response_error,omitempty"` // Error decoding ABCI responses
+	ConsensusParams     *tmConsensusParams `json:"consensus_params,omitempty"` // For consensus_params
+	ConsensusParamsError string            `json:"consensus_params_error,omitempty"` // Error decoding consensus params
+	ConsensusValidators *tmValidatorSet    `json:"consensus_validators,omitempty"` // For validators
+	ValidatorsError     string             `json:"validators_error,omitempty"` // Error decoding validators
+	ConsensusState      *tmState           `json:"consensus_state,omitempty"` // For state
+	StateError          string             `json:"state_error,omitempty"` // Error decoding state
 }
 
-// ABCIResponseInfo represents decoded ABCI response summary.
+// ConsensusABCIResponseInfo represents decoded ABCI response summary.
 // See: tendermint/proto/tendermint/abci/types.proto (ResponseFinalizeBlock)
-type ABCIResponseInfo struct {
+type ConsensusABCIResponseInfo struct {
 	TxResultCount      int                        `json:"tx_result_count"`
 	ValidatorUpdates   int                        `json:"validator_updates"`
 	EventCount         int                        `json:"event_count"`
@@ -176,22 +190,13 @@ type ABCIResponseInfo struct {
 
 // ConsensusTransactionSummary summarizes decoded transactions from ABCI responses.
 type ConsensusTransactionSummary struct {
-	MethodCounts map[string]int                 `json:"method_counts"`         // Count by method name
-	Transactions []ConsensusDecodedTransaction  `json:"transactions,omitempty"` // Decoded transaction details
+	MethodCounts map[string]int            `json:"method_counts"`         // Count by method name
+	Transactions []ConsensusTransactionInfo `json:"transactions,omitempty"` // Decoded transaction details
 }
 
-// ConsensusEventSummary summarizes decoded events from ABCI responses.
-type ConsensusEventSummary struct {
-	EventTypeCounts map[string]int `json:"event_type_counts"` // Count by event type
-}
-
-// =============================================================================
-// Transaction and Event Types (Oasis-specific)
-// =============================================================================
-
-// ConsensusDecodedTransaction represents a decoded Oasis consensus transaction.
+// ConsensusTransactionInfo represents a decoded Oasis consensus transaction.
 // See: _oasis-core/go/consensus/api/transaction/transaction.go:42-54
-type ConsensusDecodedTransaction struct {
+type ConsensusTransactionInfo struct {
 	Nonce      uint64  `json:"nonce"`
 	Method     string  `json:"method"`
 	Fee        *ConsensusFee `json:"fee,omitempty"`
@@ -199,7 +204,6 @@ type ConsensusDecodedTransaction struct {
 	TxHash     string  `json:"tx_hash,omitempty"`    // hex-encoded transaction hash
 	BodyPreview string `json:"body_preview,omitempty"` // hex preview if body not decoded
 	DecodedBody interface{} `json:"decoded_body,omitempty"` // Decoded body for known types
-	DecodeError string `json:"decode_error,omitempty"`
 }
 
 // ConsensusFee represents transaction fee.
@@ -209,125 +213,144 @@ type ConsensusFee struct {
 	Gas    uint64 `json:"gas"`
 }
 
-// ConsensusSignedTransaction represents the signature envelope.
-// See: _oasis-core/go/common/crypto/signature/signature.go:415-421
-type ConsensusSignedTransaction struct {
-	Blob      []byte              `json:"untrusted_raw_value"`
-	Signature ConsensusSignature  `json:"signature"`
+// ConsensusEventSummary summarizes decoded events from ABCI responses.
+type ConsensusEventSummary struct {
+	EventTypeCounts map[string]int `json:"event_type_counts"` // Count by event type
 }
 
-// ConsensusSignature represents a signature with public key.
+
+// =============================================================================
+// Consensus CBOR Deserialization Types
+// =============================================================================
+
+// cborConsensusSignedTransaction represents the signature envelope.
+// See: _oasis-core/go/common/crypto/signature/signature.go:415-421
+type cborConsensusSignedTransaction struct {
+	Blob      []byte                   `json:"untrusted_raw_value"`
+	Signature cborConsensusSignature   `json:"signature"`
+}
+
+// cborConsensusInnerTransaction represents an unsigned consensus transaction.
+// See: _oasis-core/go/consensus/api/transaction/transaction.go:43-54
+type cborConsensusInnerTransaction struct {
+	Nonce  uint64
+	Fee    *cborConsensusFee
+	Method string
+	Body   cbor.RawMessage
+}
+
+// cborConsensusFee represents transaction fee.
+// See: _oasis-core/go/consensus/api/transaction/gas.go:30-35
+type cborConsensusFee struct {
+	Amount string `json:"amount"` // string representation of quantity.Quantity
+	Gas    uint64 `json:"gas"`
+}
+
+// cborConsensusSignature represents a signature with public key.
 // See: _oasis-core/go/common/crypto/signature/signature.go:313-318
-type ConsensusSignature struct {
+type cborConsensusSignature struct {
 	PublicKey [32]byte `json:"public_key"` // ED25519 public key
 	Signature [64]byte `json:"signature"`  // ED25519 signature
 }
 
-// =============================================================================
-// Transaction Body Types (Staking Module)
-// =============================================================================
-
-// ConsensusTransfer represents a staking transfer transaction body.
+// cborConsensusTransfer represents a staking transfer transaction body.
 // See: _oasis-core/go/staking/api/api.go:342-345
-type ConsensusTransfer struct {
+type cborConsensusTransfer struct {
 	To     [21]byte `json:"to"`     // Oasis address
 	Amount string   `json:"amount"` // string representation of quantity.Quantity
 }
 
-// ConsensusBurn represents a staking burn transaction body.
+// cborConsensusBurn represents a staking burn transaction body.
 // See: _oasis-core/go/staking/api/api.go:368-370
-type ConsensusBurn struct {
+type cborConsensusBurn struct {
 	Amount string `json:"amount"` // string representation of quantity.Quantity
 }
 
-// ConsensusAddEscrow represents an add escrow transaction body.
+// cborConsensusAddEscrow represents an add escrow transaction body.
 // See: _oasis-core/go/staking/api/api.go:403-406
-type ConsensusAddEscrow struct {
+type cborConsensusAddEscrow struct {
 	Account [21]byte `json:"account"` // Oasis address
 	Amount  string   `json:"amount"`  // string representation of quantity.Quantity
 }
 
-// ConsensusReclaimEscrow represents a reclaim escrow transaction body.
+// cborConsensusReclaimEscrow represents a reclaim escrow transaction body.
 // See: _oasis-core/go/staking/api/api.go:444-447
-type ConsensusReclaimEscrow struct {
+type cborConsensusReclaimEscrow struct {
 	Account [21]byte `json:"account"` // Oasis address
 	Shares  string   `json:"shares"`  // string representation of quantity.Quantity
 }
 
-// ConsensusRegisterEntity represents a registry entity registration transaction body.
+// cborConsensusRegisterEntity represents a registry entity registration transaction body.
 // See: _oasis-core/go/registry/api/api.go
-type ConsensusRegisterEntity struct {
+type cborConsensusRegisterEntity struct {
 	Signature  []byte `json:"signature,omitempty"`
 	Descriptor []byte `json:"descriptor,omitempty"` // CBOR-encoded entity descriptor
 }
 
-// ConsensusRegisterNode represents a registry node registration transaction body.
+// cborConsensusRegisterNode represents a registry node registration transaction body.
 // See: _oasis-core/go/registry/api/api.go
-type ConsensusRegisterNode struct {
+type cborConsensusRegisterNode struct {
 	Signature  []byte `json:"signature,omitempty"`
 	Descriptor []byte `json:"descriptor,omitempty"` // CBOR-encoded node descriptor
 }
 
-// ConsensusExecutorCommit represents a roothash executor commit transaction body.
+// cborConsensusExecutorCommit represents a roothash executor commit transaction body.
 // See: _oasis-core/go/roothash/api/commitment/executor.go
-type ConsensusExecutorCommit struct {
+type cborConsensusExecutorCommit struct {
 	ID      []byte `json:"runtime_id,omitempty"`  // Runtime ID
 	Commits []byte `json:"commits,omitempty"`     // CBOR-encoded commits
 }
 
-// ConsensusSubmitProposal represents a governance proposal submission transaction body.
+// cborConsensusSubmitProposal represents a governance proposal submission transaction body.
 // See: _oasis-core/go/governance/api/api.go
-type ConsensusSubmitProposal struct {
+type cborConsensusSubmitProposal struct {
 	Content []byte `json:"content,omitempty"` // CBOR-encoded proposal content
 	Deposit string `json:"deposit,omitempty"` // string representation of quantity.Quantity
 }
 
-// ConsensusCastVote represents a governance vote transaction body.
+// cborConsensusCastVote represents a governance vote transaction body.
 // See: _oasis-core/go/governance/api/api.go
-type ConsensusCastVote struct {
+type cborConsensusCastVote struct {
 	ProposalID uint64 `json:"proposal_id"`
 	Vote       uint8  `json:"vote"` // 0=invalid, 1=yes, 2=no, 3=abstain
 }
 
-// =============================================================================
-// Event Types (Staking Module)
-// =============================================================================
-
-// ConsensusTransferEvent represents a staking transfer event.
+// cborConsensusTransferEvent represents a staking transfer event.
 // See: _oasis-core/go/staking/api/api.go:223-229
-type ConsensusTransferEvent struct {
+type cborConsensusTransferEvent struct {
 	From   [21]byte `json:"from"`   // Oasis address
 	To     [21]byte `json:"to"`     // Oasis address
 	Amount string   `json:"amount"` // string representation of quantity.Quantity
 }
 
-// ConsensusBurnEvent represents a staking burn event.
+// cborConsensusBurnEvent represents a staking burn event.
 // See: _oasis-core/go/staking/api/api.go:236-240
-type ConsensusBurnEvent struct {
+type cborConsensusBurnEvent struct {
 	Owner  [21]byte `json:"owner"`  // Oasis address
 	Amount string   `json:"amount"` // string representation of quantity.Quantity
 }
 
-// ConsensusAddEscrowEvent represents an add escrow event.
+// cborConsensusAddEscrowEvent represents an add escrow event.
 // See: _oasis-core/go/staking/api/api.go:266-273
-type ConsensusAddEscrowEvent struct {
+type cborConsensusAddEscrowEvent struct {
 	Owner     [21]byte `json:"owner"`      // Oasis address
 	Escrow    [21]byte `json:"escrow"`     // Oasis address
 	Amount    string   `json:"amount"`     // string representation of quantity.Quantity
 	NewShares string   `json:"new_shares"` // string representation of quantity.Quantity
 }
 
-// ConsensusReclaimEscrowEvent represents a reclaim escrow event.
+// cborConsensusReclaimEscrowEvent represents a reclaim escrow event.
 // See: _oasis-core/go/staking/api/api.go:313-320
-type ConsensusReclaimEscrowEvent struct {
+type cborConsensusReclaimEscrowEvent struct {
 	Owner  [21]byte `json:"owner"`  // Oasis address
 	Escrow [21]byte `json:"escrow"` // Oasis address
 	Amount string   `json:"amount"` // string representation of quantity.Quantity
 	Shares string   `json:"shares"` // string representation of quantity.Quantity
 }
 
+
 // =============================================================================
-// Tendermint Protobuf Types (minimal definitions to replace tendermint dependency)
+// Tendermint Protobuf Deserialization Types
 // =============================================================================
 // Source: github.com/tendermint/tendermint v0.34.21
 // These types are used only for protobuf deserialization - no tendermint business logic is needed.

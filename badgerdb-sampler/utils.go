@@ -8,6 +8,13 @@ import (
 	"github.com/fxamacker/cbor/v2"
 )
 
+const (
+	// TruncateHashSize is the default hex character limit for hash truncation
+	TruncateHashSize = 16
+	// TruncateLongSize is the default hex character limit for long data truncation
+	TruncateLongSize = 500
+)
+
 // extractModuleName extracts module name from MKVS leaf key and returns module:subtype description
 func extractModuleName(key []byte) string {
 	if len(key) == 0 {
@@ -31,9 +38,9 @@ func extractModuleName(key []byte) string {
 			} else if kind == 2 {
 				kindStr = "output"
 			}
-			return fmt.Sprintf("io_tx:%s (hash=%s)", kindStr, truncateHex(key[1:33], 16))
+			return fmt.Sprintf("io_tx:%s (hash=%s)", kindStr, truncateHex(key[1:33], TruncateHashSize))
 		}
-		return fmt.Sprintf("io_tx (hash=%s)", truncateHex(key[1:], 16))
+		return fmt.Sprintf("io_tx (hash=%s)", truncateHex(key[1:], TruncateHashSize))
 
 	case 'E': // Event tag prefix (0x45)
 		// Key format: 'E' + tag_key (variable, module name) + tx_hash (32 bytes)
@@ -70,7 +77,7 @@ func extractModuleName(key []byte) string {
 		subKey := key[end:]
 		return describeModuleKey(moduleName, subKey)
 	}
-	return truncateHex(key, 16)
+	return truncateHex(key, TruncateHashSize)
 }
 
 // describeModuleKey returns module name with sub-key type description
@@ -179,6 +186,43 @@ func formatCBOR(v interface{}, rawLen int) string {
 		return "null"
 	default:
 		return fmt.Sprintf("%T(%d bytes)", v, rawLen)
+	}
+}
+
+// formatCBORDetailed formats decoded CBOR value with detailed structure
+func formatCBORDetailed(v interface{}) interface{} {
+	switch val := v.(type) {
+	case map[interface{}]interface{}:
+		result := make(map[string]interface{})
+		for k, v := range val {
+			keyStr := fmt.Sprintf("%v", k)
+			result[keyStr] = formatCBORDetailed(v)
+		}
+		return result
+	case []interface{}:
+		result := make([]interface{}, len(val))
+		for i, elem := range val {
+			result[i] = formatCBORDetailed(elem)
+		}
+		return result
+	case []byte:
+		// Format as hex string with size info
+		if len(val) <= 32 {
+			return truncateHex0x(val, 64)
+		}
+		return truncateHex0x(val, 64) + fmt.Sprintf(" (%d bytes)", len(val))
+	case string:
+		return val
+	case uint64:
+		return val
+	case int64:
+		return val
+	case bool:
+		return val
+	case nil:
+		return nil
+	default:
+		return fmt.Sprintf("%v", val)
 	}
 }
 

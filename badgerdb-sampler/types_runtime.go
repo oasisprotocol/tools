@@ -85,11 +85,10 @@ type RuntimeOutputArtifacts struct {
 // RuntimeMkvsKeyInfo represents a decoded runtime-mkvs key.
 // See: _oasis-core/go/storage/mkvs/db/badger/badger.go:31-66
 type RuntimeMkvsKeyInfo struct {
-	KeyType     string `json:"key_type"`             // "node", "write_log", "roots_metadata", "root_updated_nodes", "metadata", "unknown"
-	Height      uint64 `json:"height,omitempty"`     // For write_log, roots_metadata, root_updated_nodes
-	Hash        string `json:"hash,omitempty"`       // For node (hex, truncated)
-	DbPrefix    byte   `json:"db_prefix,omitempty"`  // 0x01 or 0x05 if present
-	DecodeError string `json:"decode_error,omitempty"`
+	KeyType       string `json:"key_type"`                 // "node", "write_log", "roots_metadata", "root_updated_nodes", "metadata", "unknown"
+	RuntimeHeight uint64 `json:"runtime_height,omitempty"` // For write_log, roots_metadata, root_updated_nodes
+	Hash          string `json:"hash,omitempty"`           // For node (hex, truncated)
+	DecodeError   string `json:"decode_error,omitempty"`
 }
 
 // RuntimeMkvsNodeInfo represents a decoded runtime-mkvs value (node).
@@ -124,10 +123,10 @@ type RuntimeMkvsInternalInfo struct {
 // RuntimeHistoryKeyInfo represents a decoded runtime-history key.
 // See: _oasis-core/go/runtime/history/db.go:19-31
 type RuntimeHistoryKeyInfo struct {
-	KeyType     string `json:"key_type"`             // "metadata", "block", "round_results", "unknown"
-	Height      uint64 `json:"height,omitempty"`     // For block, round_results (block height/round)
-	ExtraData   string `json:"extra,omitempty"`      // Unexpected extra bytes (hex)
-	DecodeError string `json:"decode_error,omitempty"`
+	KeyType       string `json:"key_type"`                  // "metadata", "block", "round_results", "unknown"
+	RuntimeHeight uint64 `json:"runtime_height,omitempty"`  // For block, round_results (runtime block height)
+	ExtraData     string `json:"extra,omitempty"`           // Unexpected extra bytes (hex)
+	DecodeError   string `json:"decode_error,omitempty"`
 }
 
 // RuntimeHistoryValueInfo represents a decoded runtime-history value.
@@ -143,22 +142,22 @@ type RuntimeHistoryValueInfo struct {
 // RuntimeHistoryMetadataInfo represents decoded runtime history metadata.
 // See: _oasis-core/go/runtime/history/db.go:34-44
 type RuntimeHistoryMetadataInfo struct {
-	Version             uint64 `json:"version"`
-	RuntimeID           string `json:"runtime_id"` // hex, truncated
-	LastRound           uint64 `json:"last_round"`
-	LastConsensusHeight int64  `json:"last_consensus_height"`
+	Version              uint64 `json:"version"`
+	RuntimeID            string `json:"runtime_id"`             // hex, truncated
+	LastRuntimeHeight    uint64 `json:"last_runtime_height"`    // last runtime block height
+	LastConsensusHeight  int64  `json:"last_consensus_height"`  // last consensus block height
 }
 
 // RuntimeHistoryBlockInfo represents a decoded runtime history block.
 // See: _oasis-core/go/roothash/api/api.go:402-409 (AnnotatedBlock)
 // See: _oasis-core/go/roothash/api/block/header.go:69-99 (Header)
 type RuntimeHistoryBlockInfo struct {
-	ConsensusHeight int64  `json:"consensus_height"`
-	Round           uint64 `json:"round"`
-	Timestamp       string `json:"timestamp"`  // RFC3339 format
+	ConsensusHeight int64  `json:"consensus_height"`         // consensus block height
+	RuntimeHeight   uint64 `json:"runtime_height"`           // runtime block height (formerly "round")
+	Timestamp       string `json:"timestamp"`                // RFC3339 format
 	HeaderType      string `json:"header_type"`
-	StateRoot       string `json:"state_root,omitempty"` // hex, truncated
-	BlockNil        bool   `json:"block_nil,omitempty"`  // true if block was nil
+	StateRoot       string `json:"state_root,omitempty"`     // hex, truncated
+	BlockNil        bool   `json:"block_nil,omitempty"`      // true if block was nil
 }
 
 // RuntimeHistoryRoundResultsInfo represents decoded runtime history round results.

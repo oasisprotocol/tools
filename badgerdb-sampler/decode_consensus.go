@@ -9,8 +9,6 @@ import (
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/gogo/protobuf/proto"
-	tmproto "github.com/tendermint/tendermint/proto/tendermint/types"
-	tmstore "github.com/tendermint/tendermint/proto/tendermint/store"
 )
 
 // decodeKeyConsensusBlockstore parses consensus-blockstore key and returns structured info.
@@ -43,7 +41,7 @@ func decodeKeyConsensusBlockstore(key []byte) ConsensusBlockstoreKeyInfo {
 	if strings.HasPrefix(asciiKey, "H:") {
 		info.KeyType = "block_meta"
 		if h, err := strconv.ParseInt(asciiKey[2:], 10, 64); err == nil {
-			info.Height = h
+			info.ConsensusHeight = h
 		}
 		return info
 	}
@@ -53,7 +51,7 @@ func decodeKeyConsensusBlockstore(key []byte) ConsensusBlockstoreKeyInfo {
 		parts := strings.Split(asciiKey[2:], ":")
 		if len(parts) >= 1 {
 			if h, err := strconv.ParseInt(parts[0], 10, 64); err == nil {
-				info.Height = h
+				info.ConsensusHeight = h
 			}
 		}
 		if len(parts) >= 2 {
@@ -66,14 +64,14 @@ func decodeKeyConsensusBlockstore(key []byte) ConsensusBlockstoreKeyInfo {
 	if strings.HasPrefix(asciiKey, "C:") {
 		info.KeyType = "block_commit"
 		if h, err := strconv.ParseInt(asciiKey[2:], 10, 64); err == nil {
-			info.Height = h
+			info.ConsensusHeight = h
 		}
 		return info
 	}
 	if strings.HasPrefix(asciiKey, "SC:") {
 		info.KeyType = "seen_commit"
 		if h, err := strconv.ParseInt(asciiKey[3:], 10, 64); err == nil {
-			info.Height = h
+			info.ConsensusHeight = h
 		}
 		return info
 	}
@@ -97,22 +95,22 @@ func decodeValueConsensusBlockstore(keyType string, value []byte) ConsensusBlock
 
 	switch keyType {
 	case "blockstore_state":
-		var state tmstore.BlockStoreState
+		var state tmBlockStoreState
 		if err := proto.Unmarshal(value, &state); err == nil {
 			info.State = &ConsensusBlockStoreState{
-				Base:   state.Base,
-				Height: state.Height,
+				Base:            state.Base,
+				ConsensusHeight: state.Height,
 			}
 		} else {
 			info.DecodeError = err.Error()
 		}
 
 	case "block_meta":
-		var meta tmproto.BlockMeta
+		var meta tmBlockMeta
 		if err := proto.Unmarshal(value, &meta); err == nil {
 			blockMeta := &ConsensusBlockMetaInfo{
-				Height: meta.Header.Height,
-				NumTxs: meta.NumTxs,
+				ConsensusHeight: meta.Header.Height,
+				NumTxs:          meta.NumTxs,
 			}
 
 			// Extract timestamp
@@ -121,12 +119,8 @@ func decodeValueConsensusBlockstore(keyType string, value []byte) ConsensusBlock
 				blockMeta.Time = meta.Header.Time.Format(time.RFC3339)
 			}
 
-			// Format AppHash
-			if len(meta.Header.AppHash) >= 8 {
-				blockMeta.AppHash = fmt.Sprintf("%x", meta.Header.AppHash[:8])
-			} else if len(meta.Header.AppHash) > 0 {
-				blockMeta.AppHash = fmt.Sprintf("%x", meta.Header.AppHash)
-			}
+			// Format AppHash (truncate to 16 bytes = 32 hex chars)
+			blockMeta.AppHash = truncateHex(meta.Header.AppHash, 32)
 
 			// Truncate ChainID
 			chainID := meta.Header.ChainID
@@ -141,7 +135,7 @@ func decodeValueConsensusBlockstore(keyType string, value []byte) ConsensusBlock
 		}
 
 	case "block_part":
-		var part tmproto.Part
+		var part tmPart
 		if err := proto.Unmarshal(value, &part); err == nil {
 			info.Part = &ConsensusPartInfo{
 				Index:      part.Index,
@@ -153,12 +147,12 @@ func decodeValueConsensusBlockstore(keyType string, value []byte) ConsensusBlock
 		}
 
 	case "block_commit", "seen_commit":
-		var commit tmproto.Commit
+		var commit tmCommit
 		if err := proto.Unmarshal(value, &commit); err == nil {
 			info.Commit = &ConsensusCommitInfo{
-				Height:     commit.Height,
-				Round:      commit.Round,
-				Signatures: len(commit.Signatures),
+				ConsensusHeight: commit.Height,
+				Round:           commit.Round,
+				Signatures:      len(commit.Signatures),
 			}
 		} else {
 			info.DecodeError = err.Error()
@@ -213,24 +207,43 @@ func decodeValueConsensusEvidence(keyType string, value []byte) ConsensusEvidenc
 		return info
 	}
 
-	// Try to decode as DuplicateVoteEvidence
-	var evidence tmproto.DuplicateVoteEvidence
-	if err := proto.Unmarshal(value, &evidence); err == nil {
-		if evidence.VoteA != nil {
-			info.VoteAHeight = evidence.VoteA.Height
+	// Try to decode as DuplicateVoteEvidence first
+	var dve tmDuplicateVoteEvidence
+	if err := proto.Unmarshal(value, &dve); err == nil && dve.VoteA != nil {
+		info.EvidenceType = "duplicate_vote"
+		info.VoteAHeight = dve.VoteA.Height
+		if dve.VoteB != nil {
+			info.VoteBHeight = dve.VoteB.Height
 		}
-		if evidence.VoteB != nil {
-			info.VoteBHeight = evidence.VoteB.Height
+		info.TotalVotingPower = dve.TotalVotingPower
+		info.ValidatorPower = dve.ValidatorPower
+		if dve.Timestamp.Unix() > 0 {
+			info.Timestamp = dve.Timestamp.Format(time.RFC3339)
 		}
-	} else {
-		info.DecodeError = err.Error()
+		return info
 	}
+
+	// Try to decode as LightClientAttackEvidence
+	var lca tmLightClientAttackEvidence
+	if err := proto.Unmarshal(value, &lca); err == nil && lca.ConflictingBlock != nil {
+		info.EvidenceType = "light_client_attack"
+		info.TotalVotingPower = lca.TotalVotingPower
+		if lca.Timestamp.Unix() > 0 {
+			info.Timestamp = lca.Timestamp.Format(time.RFC3339)
+		}
+		return info
+	}
+
+	// If all parsing failed, show raw value
+	info.EvidenceType = "unknown"
+	info.RawValue = truncateHex(value, 64)
+	info.DecodeError = "unable to decode evidence format"
 
 	return info
 }
 
 // decodeKeyConsensusMkvs parses consensus-mkvs key and returns structured info.
-// Handles both old format (no dbVersion prefix) and new format (0x01 or 0x05 dbVersion prefix).
+// Keys use keyformat encoding: [type_byte][data...]
 // See: _oasis-core/go/storage/mkvs/db/badger/badger.go:31-66
 func decodeKeyConsensusMkvs(key []byte) ConsensusMkvsKeyInfo {
 	info := ConsensusMkvsKeyInfo{}
@@ -241,22 +254,9 @@ func decodeKeyConsensusMkvs(key []byte) ConsensusMkvsKeyInfo {
 		return info
 	}
 
-	// Check if key has dbVersion prefix (0x01 or 0x05)
+	// First byte is the key type prefix
 	prefixByte := key[0]
-	var data []byte
-
-	if prefixByte == 0x01 || prefixByte == 0x05 {
-		info.DbPrefix = prefixByte
-		if len(key) < 2 {
-			info.KeyType = "unknown"
-			info.DecodeError = "key too short after prefix"
-			return info
-		}
-		prefixByte = key[1]
-		data = key[2:]
-	} else {
-		data = key[1:]
-	}
+	data := key[1:]
 
 	switch prefixByte {
 	case 0x00:
@@ -266,10 +266,10 @@ func decodeKeyConsensusMkvs(key []byte) ConsensusMkvsKeyInfo {
 	case 0x01:
 		info.KeyType = "write_log"
 		if len(data) >= 8 {
-			info.Height = binary.BigEndian.Uint64(data[0:8])
+			info.ConsensusHeight = binary.BigEndian.Uint64(data[0:8])
 			if len(data) >= 8+33 {
 				info.RootType = data[8]
-				info.Hash = truncateHex(data[9:9+32], 8)
+				info.Hash = truncateHex(data[9:9+32], 32)
 			}
 		} else {
 			info.DecodeError = "write_log data too short"
@@ -278,7 +278,7 @@ func decodeKeyConsensusMkvs(key []byte) ConsensusMkvsKeyInfo {
 	case 0x02:
 		info.KeyType = "roots_metadata"
 		if len(data) >= 8 {
-			info.Height = binary.BigEndian.Uint64(data[0:8])
+			info.ConsensusHeight = binary.BigEndian.Uint64(data[0:8])
 		} else {
 			info.DecodeError = "roots_metadata data too short"
 		}
@@ -286,10 +286,10 @@ func decodeKeyConsensusMkvs(key []byte) ConsensusMkvsKeyInfo {
 	case 0x03:
 		info.KeyType = "root_updated_nodes"
 		if len(data) >= 8 {
-			info.Height = binary.BigEndian.Uint64(data[0:8])
+			info.ConsensusHeight = binary.BigEndian.Uint64(data[0:8])
 			if len(data) >= 8+33 {
 				info.RootType = data[8]
-				info.Hash = truncateHex(data[9:9+32], 8)
+				info.Hash = truncateHex(data[9:9+32], 32)
 			}
 		} else {
 			info.DecodeError = "root_updated_nodes data too short"
@@ -368,6 +368,22 @@ func decodeValueConsensusMkvs(keyType string, value []byte) ConsensusMkvsNodeInf
 			Module: module,
 			KeyLen: keyLen,
 			Key:    truncateHex(key, 32),
+		}
+
+		// Extract Oasis address for staking-related modules
+		// Staking keys have format: module_prefix (1 byte) + 21-byte Oasis address
+		if keyLen == 22 {
+			switch key[0] {
+			case 0x34, 0x35, 0x36, 0x37: // staking accounts, delegations, debonding, allowances
+				leaf.OasisAddress = bech32Encode("oasis", key[1:22])
+			}
+		}
+		// Entity/node keys also contain addresses
+		if keyLen >= 22 {
+			switch key[0] {
+			case 0x40, 0x41: // registry entities, nodes
+				leaf.OasisAddress = bech32Encode("oasis", key[1:22])
+			}
 		}
 
 		if len(data) < 4 {
@@ -587,10 +603,28 @@ func decodeKeyConsensusState(key []byte) ConsensusStateKeyInfo {
 		switch prefix {
 		case "abciResponsesKey":
 			info.KeyType = "abci_responses"
+			// Extract height from key like "abciResponsesKey:10000000"
+			if colonIdx < len(decoded)-1 {
+				if h, err := strconv.ParseInt(decoded[colonIdx+1:], 10, 64); err == nil {
+					info.ConsensusHeight = h
+				}
+			}
 		case "consensusParamsKey":
 			info.KeyType = "consensus_params"
+			// Extract height if present
+			if colonIdx < len(decoded)-1 {
+				if h, err := strconv.ParseInt(decoded[colonIdx+1:], 10, 64); err == nil {
+					info.ConsensusHeight = h
+				}
+			}
 		case "validatorsKey":
 			info.KeyType = "validators"
+			// Extract height if present
+			if colonIdx < len(decoded)-1 {
+				if h, err := strconv.ParseInt(decoded[colonIdx+1:], 10, 64); err == nil {
+					info.ConsensusHeight = h
+				}
+			}
 		case "stateKey":
 			info.KeyType = "state"
 		case "genesisDoc":
@@ -607,8 +641,232 @@ func decodeKeyConsensusState(key []byte) ConsensusStateKeyInfo {
 
 // decodeValueConsensusState decodes state value and returns structured info.
 func decodeValueConsensusState(keyType string, value []byte) ConsensusStateValueInfo {
-	return ConsensusStateValueInfo{
+	info := ConsensusStateValueInfo{
 		KeyType: keyType,
 		Size:    len(value),
 	}
+
+	if len(value) == 0 {
+		return info
+	}
+
+	switch keyType {
+	case "abci_responses":
+		// Try to decode ABCI responses (ResponseFinalizeBlock in newer Tendermint)
+		var resp tmABCIResponses
+		if err := proto.Unmarshal(value, &resp); err == nil {
+			abciInfo := &ABCIResponseInfo{}
+
+			// Count deliver_tx results (transaction results)
+			if resp.DeliverTxs != nil {
+				abciInfo.TxResultCount = len(resp.DeliverTxs)
+			}
+
+			// Count events from end_block
+			if resp.EndBlock != nil {
+				abciInfo.EventCount = len(resp.EndBlock.Events)
+				if resp.EndBlock.ValidatorUpdates != nil {
+					abciInfo.ValidatorUpdates = len(resp.EndBlock.ValidatorUpdates)
+				}
+			}
+
+			// Count event types from all sources
+			eventSummary := &ConsensusEventSummary{
+				EventTypeCounts: make(map[string]int),
+			}
+
+			// Decode transactions and collect events from DeliverTxs
+			txSummary := &ConsensusTransactionSummary{
+				MethodCounts: make(map[string]int),
+			}
+
+			if resp.DeliverTxs != nil {
+				for _, txResult := range resp.DeliverTxs {
+					// Count events
+					for _, event := range txResult.Events {
+						eventSummary.EventTypeCounts[event.Type]++
+					}
+
+					// Decode transaction if present
+					if len(txResult.Data) > 0 {
+						decodedTx := decodeCBORTransaction(txResult.Data)
+						if decodedTx.DecodeError == "" {
+							txSummary.MethodCounts[decodedTx.Method]++
+							// Only include first few transactions for sample
+							if len(txSummary.Transactions) < 5 {
+								txSummary.Transactions = append(txSummary.Transactions, decodedTx)
+							}
+						}
+					}
+				}
+			}
+
+			if len(txSummary.MethodCounts) > 0 {
+				abciInfo.TransactionSummary = txSummary
+			}
+
+			// Events from BeginBlock
+			if resp.BeginBlock != nil {
+				for _, event := range resp.BeginBlock.Events {
+					eventSummary.EventTypeCounts[event.Type]++
+				}
+			}
+
+			// Events from EndBlock
+			if resp.EndBlock != nil {
+				for _, event := range resp.EndBlock.Events {
+					eventSummary.EventTypeCounts[event.Type]++
+				}
+			}
+
+			if len(eventSummary.EventTypeCounts) > 0 {
+				abciInfo.EventSummary = eventSummary
+			}
+
+			info.ABCIInfo = abciInfo
+		} else {
+			info.DecodeError = fmt.Sprintf("failed to decode ABCI responses: %v", err)
+		}
+
+	case "consensus_params":
+		info.RawValue = truncateHex(value, 32)
+		var params tmConsensusParams
+		if err := proto.Unmarshal(value, &params); err == nil {
+			info.ConsensusParams = &params
+		} else {
+			info.DecodeError = fmt.Sprintf("failed to decode consensus params: %v", err)
+		}
+
+	case "validators":
+		info.RawValue = truncateHex(value, 32)
+		var valSet tmValidatorSet
+		if err := proto.Unmarshal(value, &valSet); err == nil {
+			info.ConsensusValidators = &valSet
+		} else {
+			info.DecodeError = fmt.Sprintf("failed to decode validator set: %v", err)
+		}
+
+	case "state":
+		info.RawValue = truncateHex(value, 32)
+		var state tmState
+		if err := proto.Unmarshal(value, &state); err == nil {
+			info.ConsensusState = &state
+		} else {
+			info.DecodeError = fmt.Sprintf("failed to decode state: %v", err)
+		}
+
+	case "genesis":
+		info.RawValue = truncateHex(value, 64)
+		if value[0] != '{' {
+			info.DecodeError = "genesis document not in expected JSON format"
+		}
+		// Genesis is JSON, RawValue shows hex preview
+
+	default:
+		info.RawValue = truncateHex(value, 32)
+	}
+
+	return info
+}
+
+// decodeCBORTransaction decodes a raw CBOR-encoded transaction bytes into ConsensusDecodedTransaction.
+// See: _oasis-core/go/consensus/api/transaction/transaction.go:42-54
+// See: _oasis-core/go/common/crypto/signature/signature.go:415-421
+// See: _oasis-core/go/staking/api/api.go for transaction body types
+func decodeCBORTransaction(rawTx []byte) ConsensusDecodedTransaction {
+	decoded := ConsensusDecodedTransaction{}
+
+	// Decode SignedTransaction envelope
+	var signedTx ConsensusSignedTransaction
+	if err := cbor.Unmarshal(rawTx, &signedTx); err != nil {
+		decoded.DecodeError = fmt.Sprintf("failed to decode SignedTransaction: %v", err)
+		return decoded
+	}
+
+	// Extract signer public key
+	decoded.Signer = fmt.Sprintf("%x", signedTx.Signature.PublicKey[:])
+
+	// Decode inner Transaction from the blob
+	var tx struct {
+		Nonce  uint64          `cbor:"nonce"`
+		Fee    *ConsensusFee   `cbor:"fee"`
+		Method string          `cbor:"method"`
+		Body   cbor.RawMessage `cbor:"body"`
+	}
+	if err := cbor.Unmarshal(signedTx.Blob, &tx); err != nil {
+		decoded.DecodeError = fmt.Sprintf("failed to decode Transaction: %v", err)
+		return decoded
+	}
+
+	decoded.Nonce = tx.Nonce
+	decoded.Method = tx.Method
+	decoded.Fee = tx.Fee
+
+	// Decode body based on method
+	if len(tx.Body) > 0 {
+		decoded.BodyPreview = truncateHex(tx.Body, 32)
+
+		switch tx.Method {
+		case "staking.Transfer":
+			var transfer ConsensusTransfer
+			if err := cbor.Unmarshal(tx.Body, &transfer); err == nil {
+				transfer.Amount = quantityBytesToString(tx.Body, "amount")
+				decoded.DecodedBody = transfer
+			}
+
+		case "staking.Burn":
+			var burn ConsensusBurn
+			if err := cbor.Unmarshal(tx.Body, &burn); err == nil {
+				burn.Amount = quantityBytesToString(tx.Body, "amount")
+				decoded.DecodedBody = burn
+			}
+
+		case "staking.AddEscrow":
+			var escrow ConsensusAddEscrow
+			if err := cbor.Unmarshal(tx.Body, &escrow); err == nil {
+				escrow.Amount = quantityBytesToString(tx.Body, "amount")
+				decoded.DecodedBody = escrow
+			}
+
+		case "staking.ReclaimEscrow":
+			var reclaim ConsensusReclaimEscrow
+			if err := cbor.Unmarshal(tx.Body, &reclaim); err == nil {
+				reclaim.Shares = quantityBytesToString(tx.Body, "shares")
+				decoded.DecodedBody = reclaim
+			}
+
+		case "registry.RegisterEntity":
+			var regEntity ConsensusRegisterEntity
+			if err := cbor.Unmarshal(tx.Body, &regEntity); err == nil {
+				decoded.DecodedBody = regEntity
+			}
+
+		case "registry.RegisterNode":
+			var regNode ConsensusRegisterNode
+			if err := cbor.Unmarshal(tx.Body, &regNode); err == nil {
+				decoded.DecodedBody = regNode
+			}
+
+		case "roothash.ExecutorCommit":
+			var execCommit ConsensusExecutorCommit
+			if err := cbor.Unmarshal(tx.Body, &execCommit); err == nil {
+				decoded.DecodedBody = execCommit
+			}
+
+		case "governance.SubmitProposal":
+			var proposal ConsensusSubmitProposal
+			if err := cbor.Unmarshal(tx.Body, &proposal); err == nil {
+				proposal.Deposit = quantityBytesToString(tx.Body, "deposit")
+				decoded.DecodedBody = proposal
+			}
+
+		case "governance.CastVote":
+			var vote ConsensusCastVote
+			if err := cbor.Unmarshal(tx.Body, &vote); err == nil {
+				decoded.DecodedBody = vote
+			}
+		}
+	}
+
+	return decoded
 }

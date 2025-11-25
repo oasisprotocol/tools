@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+
+	"github.com/fxamacker/cbor/v2"
 )
 
 // extractModuleName extracts module name from MKVS leaf key and returns module:subtype description
@@ -193,13 +195,22 @@ func isPrintableASCII(s string) bool {
 	return true
 }
 
-// truncateHex converts bytes to hex and truncates if too long
+// truncateHex converts bytes to hex and truncates if too long.
 func truncateHex(data []byte, maxLen int) string {
 	hex := fmt.Sprintf("%x", data)
 	if len(hex) > maxLen {
 		return hex[:maxLen] + "..."
 	}
 	return hex
+}
+
+// truncateHex0x converts bytes to 0x-prefixed hex and truncates if too long.
+func truncateHex0x(data []byte, maxLen int) string {
+	hex := fmt.Sprintf("%x", data)
+	if len(hex) > maxLen {
+		return "0x" + hex[:maxLen] + "..."
+	}
+	return "0x" + hex
 }
 
 // formatU256 converts big-endian U256 bytes to decimal string.
@@ -209,5 +220,110 @@ func formatU256(b []byte) string {
 	}
 	n := new(big.Int).SetBytes(b)
 	return n.String()
+}
+
+// bech32Charset is the character set for bech32 encoding
+const bech32Charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+
+// bech32Encode encodes data with bech32 using the given human-readable part
+func bech32Encode(hrp string, data []byte) string {
+	// Convert 8-bit data to 5-bit groups
+	var values []int
+	acc := 0
+	bits := 0
+	for _, b := range data {
+		acc = (acc << 8) | int(b)
+		bits += 8
+		for bits >= 5 {
+			bits -= 5
+			values = append(values, (acc>>bits)&31)
+		}
+	}
+	if bits > 0 {
+		values = append(values, (acc<<(5-bits))&31)
+	}
+
+	// Create checksum
+	checksum := bech32CreateChecksum(hrp, values)
+
+	// Build result efficiently using strings.Builder
+	var result strings.Builder
+	result.Grow(len(hrp) + 1 + len(values) + len(checksum))
+	result.WriteString(hrp)
+	result.WriteString("1")
+	for _, v := range values {
+		result.WriteByte(bech32Charset[v])
+	}
+	for _, v := range checksum {
+		result.WriteByte(bech32Charset[v])
+	}
+	return result.String()
+}
+
+// bech32Polymod computes the bech32 checksum polynomial
+func bech32Polymod(values []int) int {
+	gen := []int{0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3}
+	chk := 1
+	for _, v := range values {
+		b := chk >> 25
+		chk = ((chk & 0x1ffffff) << 5) ^ v
+		for i := 0; i < 5; i++ {
+			if (b>>i)&1 == 1 {
+				chk ^= gen[i]
+			}
+		}
+	}
+	return chk
+}
+
+// bech32HRPExpand expands the human-readable part for checksum calculation
+func bech32HRPExpand(hrp string) []int {
+	result := make([]int, 0, len(hrp)*2+1)
+	for _, c := range hrp {
+		result = append(result, int(c)>>5)
+	}
+	result = append(result, 0)
+	for _, c := range hrp {
+		result = append(result, int(c)&31)
+	}
+	return result
+}
+
+// bech32CreateChecksum creates the bech32 checksum
+func bech32CreateChecksum(hrp string, data []int) []int {
+	values := append(bech32HRPExpand(hrp), data...)
+	values = append(values, 0, 0, 0, 0, 0, 0)
+	polymod := bech32Polymod(values) ^ 1
+	checksum := make([]int, 6)
+	for i := 0; i < 6; i++ {
+		checksum[i] = (polymod >> (5 * (5 - i))) & 31
+	}
+	return checksum
+}
+
+// quantityBytesToString extracts a quantity.Quantity field from CBOR bytes and converts to string.
+// This is a simplified parser that decodes the CBOR to get the nested big.Int value.
+// See: _oasis-core/go/common/quantity/quantity.go:28-30
+func quantityBytesToString(cborBytes []byte, fieldName string) string {
+	// Decode to a generic map to extract the field
+	var data map[string]interface{}
+	if err := cbor.Unmarshal(cborBytes, &data); err != nil {
+		return "<decode_error>"
+	}
+
+	// Get the field value
+	if val, ok := data[fieldName]; ok {
+		// quantity.Quantity is encoded as a byte slice containing the big.Int bytes
+		if qtyBytes, ok := val.([]byte); ok {
+			// Convert bytes to big.Int
+			var bi big.Int
+			bi.SetBytes(qtyBytes)
+			return bi.String()
+		}
+		// Try direct conversion
+		return fmt.Sprintf("%v", val)
+	}
+
+	return "<field_not_found>"
 }
 

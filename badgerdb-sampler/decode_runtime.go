@@ -9,7 +9,7 @@ import (
 )
 
 // decodeKeyRuntimeMkvs parses runtime-mkvs key and returns structured info.
-// Key format: [optional db prefix 0x01|0x05][type byte][data...]
+// Keys use keyformat encoding: [type_byte][data...]
 // See: _oasis-core/go/storage/mkvs/db/badger/badger.go:31-66
 func decodeKeyRuntimeMkvs(key []byte) RuntimeMkvsKeyInfo {
 	info := RuntimeMkvsKeyInfo{}
@@ -20,22 +20,9 @@ func decodeKeyRuntimeMkvs(key []byte) RuntimeMkvsKeyInfo {
 		return info
 	}
 
-	// Check for dbVersion prefix (0x01 or 0x05)
+	// First byte is the key type prefix
 	prefixByte := key[0]
-	var data []byte
-
-	if prefixByte == 0x01 || prefixByte == 0x05 {
-		info.DbPrefix = prefixByte
-		if len(key) < 2 {
-			info.KeyType = "unknown"
-			info.DecodeError = "key too short after prefix"
-			return info
-		}
-		prefixByte = key[1]
-		data = key[2:]
-	} else {
-		data = key[1:]
-	}
+	data := key[1:]
 
 	switch prefixByte {
 	case 0x00:
@@ -44,21 +31,21 @@ func decodeKeyRuntimeMkvs(key []byte) RuntimeMkvsKeyInfo {
 	case 0x01:
 		info.KeyType = "write_log"
 		if len(data) >= 8 {
-			info.Height = binary.BigEndian.Uint64(data[0:8])
+			info.RuntimeHeight = binary.BigEndian.Uint64(data[0:8])
 		} else {
 			info.DecodeError = "write_log data too short"
 		}
 	case 0x02:
 		info.KeyType = "roots_metadata"
 		if len(data) >= 8 {
-			info.Height = binary.BigEndian.Uint64(data[0:8])
+			info.RuntimeHeight = binary.BigEndian.Uint64(data[0:8])
 		} else {
 			info.DecodeError = "roots_metadata data too short"
 		}
 	case 0x03:
 		info.KeyType = "root_updated_nodes"
 		if len(data) >= 8 {
-			info.Height = binary.BigEndian.Uint64(data[0:8])
+			info.RuntimeHeight = binary.BigEndian.Uint64(data[0:8])
 		} else {
 			info.DecodeError = "root_updated_nodes data too short"
 		}
@@ -215,7 +202,7 @@ func decodeKeyRuntimeHistory(key []byte) RuntimeHistoryKeyInfo {
 	case 0x02:
 		info.KeyType = "block"
 		if len(key) == 9 {
-			info.Height = binary.BigEndian.Uint64(key[1:9])
+			info.RuntimeHeight = binary.BigEndian.Uint64(key[1:9])
 		} else {
 			info.DecodeError = "block key wrong length"
 		}
@@ -223,7 +210,7 @@ func decodeKeyRuntimeHistory(key []byte) RuntimeHistoryKeyInfo {
 	case 0x03:
 		info.KeyType = "round_results"
 		if len(key) == 9 {
-			info.Height = binary.BigEndian.Uint64(key[1:9])
+			info.RuntimeHeight = binary.BigEndian.Uint64(key[1:9])
 		} else {
 			info.DecodeError = "round_results key wrong length"
 		}
@@ -259,10 +246,10 @@ func decodeValueRuntimeHistory(keyType string, value []byte) RuntimeHistoryValue
 			return info
 		}
 		info.Metadata = &RuntimeHistoryMetadataInfo{
-			Version:             meta.Version,
-			RuntimeID:           fmt.Sprintf("%x", meta.RuntimeID),
-			LastRound:           meta.LastRound,
-			LastConsensusHeight: meta.LastConsensusHeight,
+			Version:              meta.Version,
+			RuntimeID:            fmt.Sprintf("%x", meta.RuntimeID),
+			LastRuntimeHeight:    meta.LastRound,
+			LastConsensusHeight:  meta.LastConsensusHeight,
 		}
 
 	case "block":
@@ -278,10 +265,10 @@ func decodeValueRuntimeHistory(keyType string, value []byte) RuntimeHistoryValue
 			blockInfo.BlockNil = true
 		} else {
 			h := block.Block.Header
-			blockInfo.Round = h.Round
+			blockInfo.RuntimeHeight = h.Round
 			blockInfo.Timestamp = time.Unix(int64(h.Timestamp), 0).UTC().Format(time.RFC3339)
 			blockInfo.HeaderType = headerTypeName(h.HeaderType)
-			blockInfo.StateRoot = truncateHex(h.StateRoot, 16)
+			blockInfo.StateRoot = truncateHex(h.StateRoot, 32)
 		}
 		info.Block = blockInfo
 

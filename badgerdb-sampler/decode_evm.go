@@ -41,7 +41,7 @@ func decodeEVMData(module string, key []byte, value []byte) *EVMDataInfo {
 	case 0x01: // CODES: evm + 0x01 + H160 (address)
 		evmInfo.StorageType = "code"
 		if len(data) >= 20 {
-			evmInfo.Address = fmt.Sprintf("%x", data[:20])
+			evmInfo.Address = fmt.Sprintf("0x%x", data[:20])
 			data = data[20:]
 		}
 		// Value is contract bytecode
@@ -51,40 +51,40 @@ func decodeEVMData(module string, key []byte, value []byte) *EVMDataInfo {
 			if len(value) < previewLen {
 				previewLen = len(value)
 			}
-			evmInfo.BytecodeRaw = fmt.Sprintf("%x", value[:previewLen])
+			evmInfo.BytecodeRaw = fmt.Sprintf("0x%x", value[:previewLen])
 		}
 
 	case 0x02: // STORAGES: evm + 0x02 + H160 (address) + H256 (slot)
 		evmInfo.StorageType = "storage"
 		if len(data) >= 20 {
-			evmInfo.Address = fmt.Sprintf("%x", data[:20])
+			evmInfo.Address = fmt.Sprintf("0x%x", data[:20])
 			data = data[20:]
 			if len(data) >= 32 {
-				evmInfo.StorageSlot = fmt.Sprintf("%x", data[:32])
+				evmInfo.StorageSlot = fmt.Sprintf("0x%x", data[:32])
 			}
 		}
 		// Value is H256 storage value
 		if len(value) == 32 {
-			evmInfo.StorageValue = fmt.Sprintf("%x", value)
+			evmInfo.StorageValue = fmt.Sprintf("0x%x", value)
 		}
 
-	case 0x03: // BLOCK_HASHES: evm + 0x03 + Round (uint64 BE)
+	case 0x03: // BLOCK_HASHES: evm + 0x03 + RuntimeHeight (uint64 BE)
 		evmInfo.StorageType = "block_hash"
 		if len(data) >= 8 {
-			evmInfo.Round = binary.BigEndian.Uint64(data[:8])
+			evmInfo.RuntimeHeight = binary.BigEndian.Uint64(data[:8])
 		}
 		// Value is H256 block hash
 		if len(value) == 32 {
-			evmInfo.BlockHash = fmt.Sprintf("%x", value)
+			evmInfo.BlockHash = fmt.Sprintf("0x%x", value)
 		}
 
 	case 0x04: // CONFIDENTIAL_STORAGES: evm + 0x04 + H160 (address) + H256 (slot)
 		evmInfo.StorageType = "confidential_storage"
 		if len(data) >= 20 {
-			evmInfo.Address = fmt.Sprintf("%x", data[:20])
+			evmInfo.Address = fmt.Sprintf("0x%x", data[:20])
 			data = data[20:]
 			if len(data) >= 32 {
-				evmInfo.StorageSlot = fmt.Sprintf("%x", data[:32])
+				evmInfo.StorageSlot = fmt.Sprintf("0x%x", data[:32])
 			}
 		}
 		// Value is encrypted - we can only show size
@@ -123,7 +123,7 @@ func decodeEVMEvent(value []byte) *EVMEventInfo {
 
 	// Extract address (H160)
 	if addrBytes, ok := eventData["address"].([]byte); ok && len(addrBytes) == 20 {
-		info.Address = fmt.Sprintf("%x", addrBytes)
+		info.Address = fmt.Sprintf("0x%x", addrBytes)
 	} else {
 		// Continue decoding even with invalid address - topics and data may still be useful
 		info.DecodeError = "invalid address (continuing decode)"
@@ -135,9 +135,9 @@ func decodeEVMEvent(value []byte) *EVMEventInfo {
 		for i, topic := range topicsArray {
 			if topicBytes, ok := topic.([]byte); ok && len(topicBytes) == 32 {
 				topicHex := fmt.Sprintf("%x", topicBytes)
-				info.Topics = append(info.Topics, topicHex)
+				info.Topics = append(info.Topics, "0x"+topicHex)
 				if i == 0 {
-					info.EventHash = topicHex
+					info.EventHash = "0x" + topicHex
 					if sig, found := EVMEventSignatures[topicHex]; found {
 						info.EventSignature = sig
 					}
@@ -149,7 +149,7 @@ func decodeEVMEvent(value []byte) *EVMEventInfo {
 	// Extract data
 	if dataBytes, ok := eventData["data"].([]byte); ok {
 		info.DataSize = len(dataBytes)
-		info.DataRaw = truncateHex(dataBytes, 128) // 64 bytes = 128 hex chars
+		info.DataRaw = truncateHex0x(dataBytes, 128) // 64 bytes = 128 hex chars
 	}
 
 	return info
@@ -160,7 +160,7 @@ func decodeEVMTxInput(key []byte, value []byte) *EVMTxInputInfo {
 	info := &EVMTxInputInfo{InputSize: len(value)}
 
 	if len(key) >= 33 {
-		info.TxHash = fmt.Sprintf("%x", key[1:33])
+		info.TxHash = fmt.Sprintf("0x%x", key[1:33])
 	}
 
 	var ia RuntimeInputArtifacts
@@ -174,10 +174,16 @@ func decodeEVMTxInput(key []byte, value []byte) *EVMTxInputInfo {
 	if err := cbor.Unmarshal(ia.Input, &call); err == nil {
 		if methodVal, ok := call["method"].(string); ok {
 			info.Method = methodVal
-			if methodVal == "evm.Call" || methodVal == "evm.Create" {
-				info.EVMCall = decodeEVMCallBody(call, methodVal == "evm.Create")
+			// Decode EVM call methods that have body structure
+			if methodVal == "evm.Call" || methodVal == "evm.Create" || methodVal == "evm.SimulateCall" || methodVal == "evm.EstimateGas" {
+				isCreate := methodVal == "evm.Create"
+				info.EVMCall = decodeEVMCallBody(call, isCreate)
 			}
+		} else {
+			info.DecodeError = "method field missing or invalid in call structure"
 		}
+	} else {
+		info.DecodeError = fmt.Sprintf("failed to unmarshal call structure: %v", err)
 	}
 
 	return info
@@ -205,7 +211,7 @@ func decodeEVMCallBody(call map[interface{}]interface{}, isCreate bool) *EVMCall
 	// Extract address (calls only)
 	if !isCreate {
 		if addrBytes, ok := bodyMap["address"].([]byte); ok && len(addrBytes) == 20 {
-			info.Address = fmt.Sprintf("%x", addrBytes)
+			info.Address = fmt.Sprintf("0x%x", addrBytes)
 		}
 	}
 
@@ -221,7 +227,7 @@ func decodeEVMCallBody(call map[interface{}]interface{}, isCreate bool) *EVMCall
 	}
 	if dataBytes, ok := bodyMap[dataKey].([]byte); ok {
 		info.DataSize = len(dataBytes)
-		info.DataRaw = truncateHex(dataBytes, 64) // 32 bytes = 64 hex chars
+		info.DataRaw = truncateHex0x(dataBytes, 64) // 32 bytes = 64 hex chars
 	}
 
 	return info
@@ -248,7 +254,7 @@ func decodeEVMTxOutput(value []byte) *EVMTxOutputInfo {
 		// Raw bytes - success
 		info.Success = true
 		info.ResultSize = len(oa.Output)
-		info.ResultRaw = truncateHex(oa.Output, 64) // 32 bytes = 64 hex chars
+		info.ResultRaw = truncateHex0x(oa.Output, 64) // 32 bytes = 64 hex chars
 		return info
 	}
 
@@ -257,7 +263,7 @@ func decodeEVMTxOutput(value []byte) *EVMTxOutputInfo {
 		info.Success = true
 		if okBytes, ok := okVal.([]byte); ok {
 			info.ResultSize = len(okBytes)
-			info.ResultRaw = truncateHex(okBytes, 64)
+			info.ResultRaw = truncateHex0x(okBytes, 64)
 		}
 	} else if failVal, exists := result["fail"]; exists {
 		info.Success = false

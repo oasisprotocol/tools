@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/binary"
 	"fmt"
 	"strconv"
@@ -380,14 +381,14 @@ func decodeConsensusMkvsValue(keyType string, value []byte) ConsensusMkvsValueIn
 		if keySize == 22 {
 			switch key[0] {
 			case 0x34, 0x35, 0x36, 0x37: // staking accounts, delegations, debonding, allowances
-				leaf.OasisAddress = bech32Encode("oasis", key[1:22])
+				leaf.OasisAddress = (*(*OasisAddress)(key[1:22])).String()
 			}
 		}
 		// Entity/node keys also contain addresses
 		if keySize >= 22 {
 			switch key[0] {
 			case 0x40, 0x41: // registry entities, nodes
-				leaf.OasisAddress = bech32Encode("oasis", key[1:22])
+				leaf.OasisAddress = (*(*OasisAddress)(key[1:22])).String()
 			}
 		}
 
@@ -755,18 +756,26 @@ func decodeConsensusStateValue(keyType string, value []byte) ConsensusStateValue
 
 				if resp.DeliverTxs != nil {
 					for _, txResult := range resp.DeliverTxs {
-						// Count events
+						// Count and decode events
 						for _, event := range txResult.Events {
 							eventSummary.EventTypeCounts[event.Type]++
+
+							// Decode event if sample limit not reached
+							if decodedEvents, err := decodeConsensusEvent(event); err == nil {
+								for _, decodedEvent := range decodedEvents {
+									if len(eventSummary.Events) < 10 {
+										eventSummary.Events = append(eventSummary.Events, decodedEvent)
+									}
+								}
+							}
 						}
 
 						// Decode transaction if present
 						if len(txResult.Data) > 0 {
-							decodedTx, err := decodeCBORTransaction(txResult.Data)
-							if err == "" {
+							if decodedTx, err := decodeConsensusTransaction(txResult.Data); err == nil {
 								txSummary.MethodCounts[decodedTx.Method]++
 								// Only include first few transactions for sample
-								if len(txSummary.Transactions) < 5 {
+								if len(txSummary.Transactions) < 10 {
 									txSummary.Transactions = append(txSummary.Transactions, decodedTx)
 								}
 							}
@@ -774,14 +783,19 @@ func decodeConsensusStateValue(keyType string, value []byte) ConsensusStateValue
 					}
 				}
 
-				if len(txSummary.MethodCounts) > 0 {
-					abciResponseInfo.TransactionSummary = txSummary
-				}
-
 				// Events from BeginBlock
 				if resp.BeginBlock != nil {
 					for _, event := range resp.BeginBlock.Events {
 						eventSummary.EventTypeCounts[event.Type]++
+
+						// Decode event if sample limit not reached
+						if decodedEvents, err := decodeConsensusEvent(event); err == nil {
+							for _, decodedEvent := range decodedEvents {
+								if len(eventSummary.Events) < 10 {
+									eventSummary.Events = append(eventSummary.Events, decodedEvent)
+								}
+							}
+						}
 					}
 				}
 
@@ -789,7 +803,21 @@ func decodeConsensusStateValue(keyType string, value []byte) ConsensusStateValue
 				if resp.EndBlock != nil {
 					for _, event := range resp.EndBlock.Events {
 						eventSummary.EventTypeCounts[event.Type]++
+
+						// Decode event if sample limit not reached
+						if decodedEvents, err := decodeConsensusEvent(event); err == nil {
+							for _, decodedEvent := range decodedEvents {
+								if len(eventSummary.Events) < 10 {
+									eventSummary.Events = append(eventSummary.Events, decodedEvent)
+								}
+							}
+						}
 					}
+				}
+
+
+				if len(txSummary.MethodCounts) > 0 {
+					abciResponseInfo.TransactionSummary = txSummary
 				}
 
 				if len(eventSummary.EventTypeCounts) > 0 {
@@ -851,33 +879,33 @@ func decodeConsensusStateValue(keyType string, value []byte) ConsensusStateValue
 	return info
 }
 
-// decodeCBORTransaction decodes a raw CBOR-encoded transaction bytes into ConsensusTransactionInfo.
+// decodeConsensusTransaction decodes a raw CBOR-encoded transaction bytes into ConsensusTransactionInfo.
 // Returns (decoded, error) where error is a parsing error.
 // See: _oasis-core/go/consensus/api/transaction/transaction.go:42-54
 // See: _oasis-core/go/common/crypto/signature/signature.go:415-421
 // See: _oasis-core/go/staking/api/api.go for transaction body types
-func decodeCBORTransaction(rawTx []byte) (ConsensusTransactionInfo, string) {
-	decoded := ConsensusTransactionInfo{}
+func decodeConsensusTransaction(rawTx []byte) (ConsensusTransactionInfo, error) {
+	info := ConsensusTransactionInfo{}
 
 	// Decode SignedTransaction envelope
 	var signedTx cborConsensusSignedTransaction
 	if err := cbor.Unmarshal(rawTx, &signedTx); err != nil {
-		return decoded, fmt.Sprintf("failed to decode SignedTransaction: %v", err)
+		return info, fmt.Errorf("failed to decode SignedTransaction: %w", err)
 	}
 
 	// Extract signer public key
-	decoded.Signer = truncateHex(signedTx.Signature.PublicKey[:], TruncateLongSize)
+	info.Signer = truncateHex(signedTx.Signature.PublicKey[:], TruncateLongSize)
 
 	// Decode inner Transaction from the blob
 	var tx cborConsensusInnerTransaction
 	if err := cbor.Unmarshal(signedTx.Blob, &tx); err != nil {
-		return decoded, fmt.Sprintf("failed to decode Transaction: %v", err)
+		return info, fmt.Errorf("failed to decode Transaction: %w", err)
 	}
 
-	decoded.Nonce = tx.Nonce
-	decoded.Method = tx.Method
+	info.Nonce = tx.Nonce
+	info.Method = tx.Method
 	if tx.Fee != nil {
-		decoded.Fee = &ConsensusFee{
+		info.Fee = &ConsensusFee{
 			Amount: tx.Fee.Amount,
 			Gas:    tx.Fee.Gas,
 		}
@@ -885,69 +913,155 @@ func decodeCBORTransaction(rawTx []byte) (ConsensusTransactionInfo, string) {
 
 	// Decode body based on method
 	if len(tx.Body) > 0 {
-		decoded.BodyPreview = truncateHex(tx.Body, TruncateLongSize)
+		info.BodyHex = truncateHex(tx.Body, TruncateLongSize)
+		info.BodySize = len(tx.Body)
 
 		switch tx.Method {
 		case "staking.Transfer":
 			var transfer cborConsensusTransfer
 			if err := cbor.Unmarshal(tx.Body, &transfer); err == nil {
-				transfer.Amount = quantityBytesToString(tx.Body, "amount")
-				decoded.DecodedBody = transfer
+				info.Body = transfer
+			} else {
+				info.BodyError = fmt.Sprintf("failed to decode transfer body: %v", err)
 			}
 
 		case "staking.Burn":
 			var burn cborConsensusBurn
 			if err := cbor.Unmarshal(tx.Body, &burn); err == nil {
-				burn.Amount = quantityBytesToString(tx.Body, "amount")
-				decoded.DecodedBody = burn
+				info.Body = burn
+			} else {
+				info.BodyError = fmt.Sprintf("failed to decode burn body: %v", err)
 			}
 
 		case "staking.AddEscrow":
 			var escrow cborConsensusAddEscrow
 			if err := cbor.Unmarshal(tx.Body, &escrow); err == nil {
-				escrow.Amount = quantityBytesToString(tx.Body, "amount")
-				decoded.DecodedBody = escrow
+				info.Body = escrow
+			} else {
+				info.BodyError = fmt.Sprintf("failed to decode add_escrow body: %v", err)
 			}
 
 		case "staking.ReclaimEscrow":
 			var reclaim cborConsensusReclaimEscrow
 			if err := cbor.Unmarshal(tx.Body, &reclaim); err == nil {
-				reclaim.Shares = quantityBytesToString(tx.Body, "shares")
-				decoded.DecodedBody = reclaim
+				info.Body = reclaim
+			} else {
+				info.BodyError = fmt.Sprintf("failed to decode reclaim_escrow body: %v", err)
 			}
 
 		case "registry.RegisterEntity":
 			var regEntity cborConsensusRegisterEntity
 			if err := cbor.Unmarshal(tx.Body, &regEntity); err == nil {
-				decoded.DecodedBody = regEntity
+				info.Body = regEntity
+			} else {
+				info.BodyError = fmt.Sprintf("failed to decode register_entity body: %v", err)
 			}
 
 		case "registry.RegisterNode":
 			var regNode cborConsensusRegisterNode
 			if err := cbor.Unmarshal(tx.Body, &regNode); err == nil {
-				decoded.DecodedBody = regNode
+				info.Body = regNode
+			} else {
+				info.BodyError = fmt.Sprintf("failed to decode register_node body: %v", err)
 			}
 
 		case "roothash.ExecutorCommit":
 			var execCommit cborConsensusExecutorCommit
 			if err := cbor.Unmarshal(tx.Body, &execCommit); err == nil {
-				decoded.DecodedBody = execCommit
+				info.Body = execCommit
+			} else {
+				info.BodyError = fmt.Sprintf("failed to decode executor_commit body: %v", err)
 			}
 
 		case "governance.SubmitProposal":
 			var proposal cborConsensusSubmitProposal
 			if err := cbor.Unmarshal(tx.Body, &proposal); err == nil {
-				proposal.Deposit = quantityBytesToString(tx.Body, "deposit")
-				decoded.DecodedBody = proposal
+				info.Body = proposal
+			} else {
+				info.BodyError = fmt.Sprintf("failed to decode submit_proposal body: %v", err)
 			}
 
 		case "governance.CastVote":
 			var vote cborConsensusCastVote
 			if err := cbor.Unmarshal(tx.Body, &vote); err == nil {
-				decoded.DecodedBody = vote
+				info.Body = vote
+			} else {
+				info.BodyError = fmt.Sprintf("failed to decode cast_vote body: %v", err)
 			}
 		}
 	}
 
-	return decoded, ""
+	return info, nil
+}
+
+// decodeConsensusEvent decodes a Tendermint event into ConsensusEventInfo.
+// Events use base64-encoded CBOR-marshaled bodies in the Value field.
+// Returns all decoded attributes. On success returns (results, nil).
+// See: _oasis-core/go/consensus/api/events/events.go (TypedAttribute pattern)
+// See: _oasis-core/go/staking/api/api.go (event type definitions)
+func decodeConsensusEvent(event tmEvent) ([]ConsensusEventInfo, error) {
+	if len(event.Attributes) == 0 {
+		return nil, fmt.Errorf("event has no attributes")
+	}
+
+	var results []ConsensusEventInfo
+
+	// Process all attributes
+	for _, attr := range event.Attributes {
+		info := ConsensusEventInfo{
+			EventType: event.Type,
+			EventKind: string(attr.Key),
+		}
+
+		// Base64 decode the attribute value
+		cborData, err := base64.StdEncoding.DecodeString(string(attr.Value))
+		if err != nil {
+			info.BodyError = fmt.Sprintf("base64 decode failed: %v", err)
+			results = append(results, info)
+			continue
+		}
+
+		// Populate raw body fields
+		info.BodyHex = truncateHex(cborData, TruncateLongSize)
+		info.BodySize = len(cborData)
+
+		// Decode body based on event kind
+		switch info.EventKind {
+		case "transfer":
+			var transfer cborConsensusTransferEvent
+			if err := cbor.Unmarshal(cborData, &transfer); err == nil {
+				info.Body = transfer
+			} else {
+				info.BodyError = fmt.Sprintf("cbor unmarshal failed: %v", err)
+			}
+
+		case "burn":
+			var burn cborConsensusBurnEvent
+			if err := cbor.Unmarshal(cborData, &burn); err == nil {
+				info.Body = burn
+			} else {
+				info.BodyError = fmt.Sprintf("cbor unmarshal failed: %v", err)
+			}
+
+		case "add_escrow":
+			var addEscrow cborConsensusAddEscrowEvent
+			if err := cbor.Unmarshal(cborData, &addEscrow); err == nil {
+				info.Body = addEscrow
+			} else {
+				info.BodyError = fmt.Sprintf("cbor unmarshal failed: %v", err)
+			}
+
+		case "reclaim_escrow":
+			var reclaimEscrow cborConsensusReclaimEscrowEvent
+			if err := cbor.Unmarshal(cborData, &reclaimEscrow); err == nil {
+				info.Body = reclaimEscrow
+			} else {
+				info.BodyError = fmt.Sprintf("cbor unmarshal failed: %v", err)
+			}
+		}
+
+		results = append(results, info)
+	}
+
+	return results, nil
 }

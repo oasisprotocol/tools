@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"math/big"
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
@@ -197,13 +199,15 @@ type ConsensusTransactionSummary struct {
 // ConsensusTransactionInfo represents a decoded Oasis consensus transaction.
 // See: _oasis-core/go/consensus/api/transaction/transaction.go:42-54
 type ConsensusTransactionInfo struct {
-	Nonce      uint64  `json:"nonce"`
-	Method     string  `json:"method"`
-	Fee        *ConsensusFee `json:"fee,omitempty"`
-	Signer     string  `json:"signer,omitempty"`     // hex-encoded public key
-	TxHash     string  `json:"tx_hash,omitempty"`    // hex-encoded transaction hash
-	BodyPreview string `json:"body_preview,omitempty"` // hex preview if body not decoded
-	DecodedBody interface{} `json:"decoded_body,omitempty"` // Decoded body for known types
+	Nonce     uint64        `json:"nonce"`
+	Method    string        `json:"method"`
+	Fee       *ConsensusFee `json:"fee,omitempty"`
+	Signer    string        `json:"signer,omitempty"`      // hex-encoded public key
+	TxHash    string        `json:"tx_hash,omitempty"`     // hex-encoded transaction hash
+	BodyHex   string        `json:"body_hex,omitempty"`    // Truncated hex dump of raw body
+	BodySize  int           `json:"body_size,omitempty"`   // Size of body in bytes
+	Body      interface{}   `json:"body,omitempty"`        // Decoded body for known types
+	BodyError string        `json:"body_error,omitempty"`  // Error decoding body
 }
 
 // ConsensusFee represents transaction fee.
@@ -215,13 +219,61 @@ type ConsensusFee struct {
 
 // ConsensusEventSummary summarizes decoded events from ABCI responses.
 type ConsensusEventSummary struct {
-	EventTypeCounts map[string]int `json:"event_type_counts"` // Count by event type
+	EventTypeCounts map[string]int    `json:"event_type_counts"`  // Count by event type
+	Events          []ConsensusEventInfo `json:"events,omitempty"` // Sample of decoded events
+}
+
+// ConsensusEventInfo represents a decoded consensus event (unified type for all event kinds).
+type ConsensusEventInfo struct {
+	EventType string      `json:"event_type"`           // "staking.transfer", "staking.burn", etc.
+	EventKind string      `json:"event_kind"`           // "transfer", "burn", "add_escrow", "reclaim_escrow"
+	BodyHex   string      `json:"body_hex,omitempty"`   // Truncated hex dump of raw body
+	BodySize  int         `json:"body_size,omitempty"`  // Size of body in bytes
+	Body      interface{} `json:"body,omitempty"`       // Decoded body for known types
+	BodyError string      `json:"body_error,omitempty"` // Error decoding body
 }
 
 
 // =============================================================================
 // Consensus CBOR Deserialization Types
 // =============================================================================
+
+// QuantityBytes wraps big.Int and implements encoding.BinaryUnmarshaler to automatically
+// decode CBOR byte strings (big-endian) into arbitrary-precision unsigned integers.
+// See: _oasis-core/go/common/quantity/quantity.go:28-50 (MarshalBinary/UnmarshalBinary)
+type QuantityBytes big.Int
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+// Decodes a byte slice (big-endian) into a big.Int.
+func (q *QuantityBytes) UnmarshalBinary(data []byte) error {
+	if q == nil {
+		return nil
+	}
+	(*big.Int)(q).SetBytes(data)
+	return nil
+}
+
+// String returns the decimal string representation of the quantity.
+func (q *QuantityBytes) String() string {
+	if q == nil {
+		return "0"
+	}
+	return (*big.Int)(q).String()
+}
+
+// OasisAddress represents a 21-byte Oasis address with automatic bech32 encoding.
+// See: _oasis-core/go/common/crypto/address/address.go (ADDRESS_SIZE = 21)
+type OasisAddress [21]byte
+
+// MarshalJSON implements json.Marshaler to automatically encode as bech32 string.
+func (a OasisAddress) MarshalJSON() ([]byte, error) {
+	return json.Marshal(bech32Encode("oasis", a[:]))
+}
+
+// String returns the bech32-encoded address (e.g., "oasis1...").
+func (a OasisAddress) String() string {
+	return bech32Encode("oasis", a[:])
+}
 
 // cborConsensusSignedTransaction represents the signature envelope.
 // See: _oasis-core/go/common/crypto/signature/signature.go:415-421
@@ -256,28 +308,28 @@ type cborConsensusSignature struct {
 // cborConsensusTransfer represents a staking transfer transaction body.
 // See: _oasis-core/go/staking/api/api.go:342-345
 type cborConsensusTransfer struct {
-	To     [21]byte `json:"to"`     // Oasis address
-	Amount string   `json:"amount"` // string representation of quantity.Quantity
+	To     OasisAddress   `json:"to"`     // Oasis address (bech32-encoded in JSON)
+	Amount *QuantityBytes `json:"amount"` // QuantityBytes automatically unmarshals from CBOR byte string
 }
 
 // cborConsensusBurn represents a staking burn transaction body.
 // See: _oasis-core/go/staking/api/api.go:368-370
 type cborConsensusBurn struct {
-	Amount string `json:"amount"` // string representation of quantity.Quantity
+	Amount *QuantityBytes `json:"amount"` // QuantityBytes automatically unmarshals from CBOR byte string
 }
 
 // cborConsensusAddEscrow represents an add escrow transaction body.
 // See: _oasis-core/go/staking/api/api.go:403-406
 type cborConsensusAddEscrow struct {
-	Account [21]byte `json:"account"` // Oasis address
-	Amount  string   `json:"amount"`  // string representation of quantity.Quantity
+	Account OasisAddress   `json:"account"` // Oasis address (bech32-encoded in JSON)
+	Amount  *QuantityBytes `json:"amount"`  // QuantityBytes automatically unmarshals from CBOR byte string
 }
 
 // cborConsensusReclaimEscrow represents a reclaim escrow transaction body.
 // See: _oasis-core/go/staking/api/api.go:444-447
 type cborConsensusReclaimEscrow struct {
-	Account [21]byte `json:"account"` // Oasis address
-	Shares  string   `json:"shares"`  // string representation of quantity.Quantity
+	Account OasisAddress   `json:"account"` // Oasis address (bech32-encoded in JSON)
+	Shares  *QuantityBytes `json:"shares"`  // QuantityBytes automatically unmarshals from CBOR byte string
 }
 
 // cborConsensusRegisterEntity represents a registry entity registration transaction body.
@@ -304,8 +356,8 @@ type cborConsensusExecutorCommit struct {
 // cborConsensusSubmitProposal represents a governance proposal submission transaction body.
 // See: _oasis-core/go/governance/api/api.go
 type cborConsensusSubmitProposal struct {
-	Content []byte `json:"content,omitempty"` // CBOR-encoded proposal content
-	Deposit string `json:"deposit,omitempty"` // string representation of quantity.Quantity
+	Content []byte         `json:"content,omitempty"` // CBOR-encoded proposal content
+	Deposit *QuantityBytes `json:"deposit,omitempty"` // QuantityBytes automatically unmarshals from CBOR byte string
 }
 
 // cborConsensusCastVote represents a governance vote transaction body.
@@ -318,34 +370,34 @@ type cborConsensusCastVote struct {
 // cborConsensusTransferEvent represents a staking transfer event.
 // See: _oasis-core/go/staking/api/api.go:223-229
 type cborConsensusTransferEvent struct {
-	From   [21]byte `json:"from"`   // Oasis address
-	To     [21]byte `json:"to"`     // Oasis address
-	Amount string   `json:"amount"` // string representation of quantity.Quantity
+	From   OasisAddress   `json:"from"`   // Oasis address (bech32-encoded in JSON)
+	To     OasisAddress   `json:"to"`     // Oasis address (bech32-encoded in JSON)
+	Amount *QuantityBytes `json:"amount"` // QuantityBytes automatically unmarshals from CBOR byte string
 }
 
 // cborConsensusBurnEvent represents a staking burn event.
 // See: _oasis-core/go/staking/api/api.go:236-240
 type cborConsensusBurnEvent struct {
-	Owner  [21]byte `json:"owner"`  // Oasis address
-	Amount string   `json:"amount"` // string representation of quantity.Quantity
+	Owner  OasisAddress   `json:"owner"`  // Oasis address (bech32-encoded in JSON)
+	Amount *QuantityBytes `json:"amount"` // QuantityBytes automatically unmarshals from CBOR byte string
 }
 
 // cborConsensusAddEscrowEvent represents an add escrow event.
 // See: _oasis-core/go/staking/api/api.go:266-273
 type cborConsensusAddEscrowEvent struct {
-	Owner     [21]byte `json:"owner"`      // Oasis address
-	Escrow    [21]byte `json:"escrow"`     // Oasis address
-	Amount    string   `json:"amount"`     // string representation of quantity.Quantity
-	NewShares string   `json:"new_shares"` // string representation of quantity.Quantity
+	Owner     OasisAddress   `json:"owner"`      // Oasis address (bech32-encoded in JSON)
+	Escrow    OasisAddress   `json:"escrow"`     // Oasis address (bech32-encoded in JSON)
+	Amount    *QuantityBytes `json:"amount"`     // QuantityBytes automatically unmarshals from CBOR byte string
+	NewShares *QuantityBytes `json:"new_shares"` // QuantityBytes automatically unmarshals from CBOR byte string
 }
 
 // cborConsensusReclaimEscrowEvent represents a reclaim escrow event.
 // See: _oasis-core/go/staking/api/api.go:313-320
 type cborConsensusReclaimEscrowEvent struct {
-	Owner  [21]byte `json:"owner"`  // Oasis address
-	Escrow [21]byte `json:"escrow"` // Oasis address
-	Amount string   `json:"amount"` // string representation of quantity.Quantity
-	Shares string   `json:"shares"` // string representation of quantity.Quantity
+	Owner  OasisAddress   `json:"owner"`  // Oasis address (bech32-encoded in JSON)
+	Escrow OasisAddress   `json:"escrow"` // Oasis address (bech32-encoded in JSON)
+	Amount *QuantityBytes `json:"amount"` // QuantityBytes automatically unmarshals from CBOR byte string
+	Shares *QuantityBytes `json:"shares"` // QuantityBytes automatically unmarshals from CBOR byte string
 }
 
 

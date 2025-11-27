@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
-
-	"github.com/fxamacker/cbor/v2"
 )
 
 const (
@@ -343,31 +341,5 @@ func bech32CreateChecksum(hrp string, data []int) []int {
 		checksum[i] = (polymod >> (5 * (5 - i))) & 31
 	}
 	return checksum
-}
-
-// quantityBytesToString extracts a quantity.Quantity field from CBOR bytes and converts to string.
-// This is a simplified parser that decodes the CBOR to get the nested big.Int value.
-// See: _oasis-core/go/common/quantity/quantity.go:28-30
-func quantityBytesToString(cborBytes []byte, fieldName string) string {
-	// Decode to a generic map to extract the field
-	var data map[string]interface{}
-	if err := cbor.Unmarshal(cborBytes, &data); err != nil {
-		return "<decode_error>"
-	}
-
-	// Get the field value
-	if val, ok := data[fieldName]; ok {
-		// quantity.Quantity is encoded as a byte slice containing the big.Int bytes
-		if qtyBytes, ok := val.([]byte); ok {
-			// Convert bytes to big.Int
-			var bi big.Int
-			bi.SetBytes(qtyBytes)
-			return bi.String()
-		}
-		// Try direct conversion
-		return fmt.Sprintf("%v", val)
-	}
-
-	return "<field_not_found>"
 }
 

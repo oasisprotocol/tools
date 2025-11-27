@@ -10,7 +10,7 @@ const (
 	// TruncateHashSize is the default hex character limit for hash truncation
 	TruncateHashSize = 16
 	// TruncateLongSize is the default hex character limit for long data truncation
-	TruncateLongSize = 500
+	TruncateLongSize = 1000
 )
 
 // extractModuleName extracts module name from MKVS leaf key and returns module:subtype description

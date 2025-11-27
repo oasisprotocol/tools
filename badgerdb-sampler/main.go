@@ -70,8 +70,8 @@ func main() {
 		log.Printf("Warning: Could not calculate database size: %v", err)
 	}
 
-	// Open database with two-mode strategy (corruption handling)
-	fmt.Printf("Opening database %s (type: %s, size: %d bytes)...\n", dbPath, dbType, dbSize)
+	// Open database with three-stage strategy (ReadOnly → Minimal RW → Local Mirror)
+	fmt.Printf("Database: %s (type: %s, size: %db)\n", dbPath, dbType, dbSize)
 	db, err := openDatabase(dbPath)
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)

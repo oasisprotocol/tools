@@ -95,3 +95,50 @@ func copyFile(src, dst string) error {
 
 	return dstFile.Sync()
 }
+
+// removeMemtableFiles renames .mem files by appending .bak suffix and returns a restore function.
+// This allows opening databases with corrupted memtables by letting BadgerDB create fresh memtable files.
+func removeMemtableFiles(dbPath string) (backupDir string, restore func() error, err error) {
+	entries, err := os.ReadDir(dbPath)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to read database directory: %w", err)
+	}
+
+	// Rename all .mem files to .mem.bak
+	count := 0
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".mem") {
+			oldPath := filepath.Join(dbPath, entry.Name())
+			newPath := oldPath + ".bak"
+			if err := os.Rename(oldPath, newPath); err != nil {
+				return "", nil, fmt.Errorf("failed to rename %s: %w", entry.Name(), err)
+			}
+			count++
+		}
+	}
+
+	fmt.Fprintf(os.Stderr, "  Renamed %d memtable file(s) to *.mem.bak\n", count)
+
+	// Restore function renames .mem.bak files back to .mem
+	restore = func() error {
+		entries, err := os.ReadDir(dbPath)
+		if err != nil {
+			return fmt.Errorf("failed to read database directory: %w", err)
+		}
+		count := 0
+		for _, entry := range entries {
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".mem.bak") {
+				oldPath := filepath.Join(dbPath, entry.Name())
+				newPath := strings.TrimSuffix(oldPath, ".bak")
+				if err := os.Rename(oldPath, newPath); err != nil {
+					return fmt.Errorf("failed to restore %s: %w", entry.Name(), err)
+				}
+				count++
+			}
+		}
+		fmt.Fprintf(os.Stderr, "  Restored %d memtable file(s) from *.mem.bak\n", count)
+		return nil
+	}
+
+	return dbPath, restore, nil
+}

@@ -1,6 +1,10 @@
 package main
 
-import "github.com/fxamacker/cbor/v2"
+import (
+	"math/big"
+
+	"github.com/fxamacker/cbor/v2"
+)
 
 // =============================================================================
 // Decoded Output Types (structured representations for JSON output)
@@ -9,34 +13,44 @@ import "github.com/fxamacker/cbor/v2"
 // RuntimeMkvsKeyInfo represents a decoded runtime-mkvs key.
 // See: _oasis-core/go/storage/mkvs/db/badger/badger.go:31-66
 type RuntimeMkvsKeyInfo struct {
+	// Raw fields
+	KeyDump  string `json:"key_dump,omitempty"`
+	KeySize  int    `json:"key_size"`
+	KeyError string `json:"key_error,omitempty"`
+
+	// Decoded fields
 	KeyType       string `json:"key_type"`                 // "node", "write_log", "roots_metadata", "root_updated_nodes", "metadata", "unknown"
 	RuntimeHeight uint64 `json:"runtime_height,omitempty"` // For write_log, roots_metadata, root_updated_nodes
 	Hash          string `json:"hash,omitempty"`           // For node (hex, truncated)
 }
 
-// RuntimeMkvsNodeInfo represents a decoded runtime-mkvs value (node).
+// RuntimeMkvsValueInfo represents a decoded runtime-mkvs value (node).
 // See: _oasis-core/go/storage/mkvs/node/node.go:26-32 (prefixes), 294-309 (InternalNode), 531-537 (LeafNode)
-type RuntimeMkvsNodeInfo struct {
-	NodeType      string                   `json:"node_type"` // "leaf", "internal", "nil", "non_node", "unknown"
-	NodeSize      int                      `json:"node_size"` // Total MKVS node size (renamed from value_size for clarity)
-	NodeHex       string                   `json:"node_hex,omitempty"` // Raw node dump (hex, truncated)
-	Leaf          *RuntimeMkvsLeafInfo     `json:"leaf,omitempty"`
-	LeafError     string                   `json:"leaf_error,omitempty"` // Error decoding leaf node
-	Internal      *RuntimeMkvsInternalInfo `json:"internal,omitempty"`
-	InternalError string                   `json:"internal_error,omitempty"` // Error decoding internal node
-	NodeError     string                   `json:"node_error,omitempty"` // Structural parsing error
+type RuntimeMkvsValueInfo struct {
+	// Raw fields
+	RawDump  string `json:"raw_dump,omitempty"`
+	RawSize  int    `json:"raw_size"`
+	RawError string `json:"raw_error,omitempty"`
+
+	// Node info
+	NodeType string                   `json:"node_type"` // "leaf", "internal", "nil", "non_node", "unknown"
+	Leaf     *RuntimeMkvsLeafInfo     `json:"leaf,omitempty"`
+	Internal *RuntimeMkvsInternalInfo `json:"internal,omitempty"`
 }
 
 // RuntimeMkvsLeafInfo represents a decoded MKVS LeafNode.
 // See: _oasis-core/go/storage/mkvs/node/node.go:531-537
 type RuntimeMkvsLeafInfo struct {
-	Module     string                `json:"module"`
-	KeySize    int                   `json:"key_size"`
-	KeyHex     string                `json:"key_hex,omitempty"` // hex, truncated
-	ValueSize  int                   `json:"value_size"`
-	ValueHex   string                `json:"value_hex,omitempty"` // hex, truncated
-	Value      *RuntimeLeafValueInfo `json:"value,omitempty"` // Decoded value (renamed from ValueDecoded)
-	ValueError string                `json:"value_error,omitempty"` // Error decoding value
+	// Leaf key (extracted from MKVS node)
+	KeyDump string `json:"key_dump,omitempty"`
+	KeySize int    `json:"key_size"`
+
+	// Decoded key fields
+	Module  string `json:"module"`
+	KeyType string `json:"key_type,omitempty"`
+
+	// Nested value (has its own raw representation)
+	Value *RuntimeLeafValueInfo `json:"value,omitempty"`
 }
 
 // RuntimeMkvsInternalInfo represents a decoded MKVS InternalNode.
@@ -51,19 +65,28 @@ type RuntimeMkvsInternalInfo struct {
 // RuntimeHistoryKeyInfo represents a decoded runtime-history key.
 // See: _oasis-core/go/runtime/history/db.go:19-31
 type RuntimeHistoryKeyInfo struct {
-	KeyType       string `json:"key_type"`                  // "metadata", "block", "round_results", "unknown"
-	RuntimeHeight uint64 `json:"runtime_height,omitempty"`  // For block, round_results (runtime block height)
-	ExtraData     string `json:"extra,omitempty"`           // Unexpected extra bytes (hex)
+	// Raw fields
+	KeyDump  string `json:"key_dump,omitempty"`
+	KeySize  int    `json:"key_size"`
+	KeyError string `json:"key_error,omitempty"`
+
+	// Decoded fields
+	KeyType       string `json:"key_type"`                 // "metadata", "block", "round_results", "unknown"
+	RuntimeHeight uint64 `json:"runtime_height,omitempty"` // For block, round_results (runtime block height)
+	ExtraData     string `json:"extra,omitempty"`          // Unexpected extra bytes (hex)
 }
 
 // RuntimeHistoryValueInfo represents a decoded runtime-history value.
 type RuntimeHistoryValueInfo struct {
-	Metadata          *RuntimeHistoryMetadataInfo     `json:"metadata,omitempty"`
-	MetadataError     string                          `json:"metadata_error,omitempty"` // Error decoding metadata
-	Block             *RuntimeHistoryBlockInfo        `json:"block,omitempty"`
-	BlockError        string                          `json:"block_error,omitempty"` // Error decoding block
-	RoundResults      *RuntimeHistoryRoundResultsInfo `json:"round_results,omitempty"`
-	RoundResultsError string                          `json:"round_results_error,omitempty"` // Error decoding round results
+	// Raw fields
+	RawDump  string `json:"raw_dump,omitempty"`
+	RawSize  int    `json:"raw_size"`
+	RawError string `json:"raw_error,omitempty"`
+
+	// Decoded content - only ONE populated
+	Metadata     *RuntimeHistoryMetadataInfo     `json:"metadata,omitempty"`
+	Block        *RuntimeHistoryBlockInfo        `json:"block,omitempty"`
+	RoundResults *RuntimeHistoryRoundResultsInfo `json:"round_results,omitempty"`
 }
 
 // RuntimeHistoryMetadataInfo represents decoded runtime history metadata.
@@ -97,19 +120,42 @@ type RuntimeHistoryRoundResultsInfo struct {
 
 // RuntimeLeafValueInfo represents a decoded MKVS leaf node value.
 // See: _oasis-core/go/runtime/transaction/transaction.go:129-150 (artifacts)
-// Note: ValueHex and ValueSize are stored in parent RuntimeMkvsLeafInfo to avoid duplication
 type RuntimeLeafValueInfo struct {
-	ValueType        string           `json:"value_type,omitempty"`          // Computed classification
-	CBOR             interface{}      `json:"cbor,omitempty"`                // For io_event and cbor types - decoded CBOR data
-	CBORError        string           `json:"cbor_error,omitempty"`          // Error decoding CBOR
-	EVM              *EVMDataInfo     `json:"evm,omitempty"`                 // For EVM-specific storage data
-	EVMError         string           `json:"evm_error,omitempty"`           // Error decoding EVM storage
-	EVMEvent         *EVMEventInfo    `json:"evm_event,omitempty"`           // For EVM event data
-	EVMEventError    string           `json:"evm_event_error,omitempty"`     // Error decoding EVM event
-	EVMTxInput       *EVMTxInputInfo  `json:"evm_tx_input,omitempty"`        // For EVM transaction input artifacts
-	EVMTxInputError  string           `json:"evm_tx_input_error,omitempty"`  // Error decoding EVM tx input
-	EVMTxOutput      *EVMTxOutputInfo `json:"evm_tx_output,omitempty"`       // For EVM transaction output artifacts
-	EVMTxOutputError string           `json:"evm_tx_output_error,omitempty"` // Error decoding EVM tx output
+	// Raw leaf value bytes (use Value* prefix for leaf-specific fields)
+	ValueDump  string `json:"value_dump,omitempty"`
+	ValueSize  int    `json:"value_size"`
+	ValueError string `json:"value_error,omitempty"`
+
+	// Classification
+	ValueType string `json:"value_type,omitempty"`
+
+	// Decoded content - only ONE populated
+	CBOR                          interface{}                         `json:"cbor,omitempty"`
+	EVM                           *EVMDataInfo                        `json:"evm,omitempty"`
+	EVMEvent                      *EVMEventInfo                       `json:"evm_event,omitempty"`
+	EVMTxInput                    *EVMTxInputInfo                     `json:"evm_tx_input,omitempty"`
+	EVMTxOutput                   *EVMTxOutputInfo                    `json:"evm_tx_output,omitempty"`
+	RuntimeConsensusEvent *RuntimeConsensusEventInfo `json:"runtime_consensus_accounts_event,omitempty"`
+}
+
+// RuntimeConsensusEventError represents consensus error.
+// See: _oasis-sdk/runtime-sdk/src/modules/consensus_accounts/types.rs:207-215
+type RuntimeConsensusEventError struct {
+	Module string `json:"module,omitempty"`
+	Code   uint32 `json:"code,omitempty"`
+}
+
+// RuntimeConsensusEventInfo is decoded consensus_accounts event.
+// See: _oasis-sdk/runtime-sdk/src/modules/consensus_accounts/mod.rs:105-157
+type RuntimeConsensusEventInfo struct {
+	EventType     string                               `json:"event_type"`
+	From          string                               `json:"from,omitempty"`
+	To            string                               `json:"to,omitempty"`
+	Nonce         uint64                               `json:"nonce,omitempty"`
+	Amount        string                               `json:"amount,omitempty"`
+	Shares        string                               `json:"shares,omitempty"`
+	DebondEndTime uint64                               `json:"debond_end_time,omitempty"`
+	Error         *RuntimeConsensusEventError `json:"error,omitempty"`
 }
 
 // =============================================================================
@@ -204,4 +250,75 @@ type cborRuntimeCallMapFormat struct {
 	Method   string          `cbor:"method,omitempty"`
 	Body     cbor.RawMessage `cbor:"body"`
 	ReadOnly bool            `cbor:"ro,omitempty"`
+}
+
+// =============================================================================
+// Runtime Event CBOR Deserialization Types
+// =============================================================================
+
+// RuntimeBaseUnits represents token::BaseUnits encoded as CBOR array [amount_bytes, denomination_bytes].
+// See: _oasis-sdk/runtime-sdk/src/types/token.rs:90
+//   pub struct BaseUnits(pub u128, pub Denomination);
+type RuntimeBaseUnits struct {
+	_            struct{} `cbor:",toarray"`
+	Amount       []byte   // u128 as big-endian bytes
+	Denomination []byte   // Denomination as bytes (empty for native token)
+}
+
+func (b *RuntimeBaseUnits) String() string {
+	if len(b.Amount) == 0 {
+		return "0"
+	}
+	return new(big.Int).SetBytes(b.Amount).String()
+}
+
+// RuntimeAddress represents a 21-byte runtime address with bech32 encoding.
+// See: _oasis-sdk/runtime-sdk/src/types/address.rs:79-80
+//   pub struct Address([u8; ADDRESS_SIZE]); // ADDRESS_SIZE = 21
+// CBOR: Encodes as ByteString
+// Display: Bech32 with HRP "oasis"
+type RuntimeAddress [21]byte
+
+func (a RuntimeAddress) String() string {
+	return bech32Encode("oasis", a[:])
+}
+
+// cborRuntimeConsensusError represents error details from consensus layer.
+// See: _oasis-sdk/runtime-sdk/src/modules/consensus_accounts/types.rs:207-215
+type cborRuntimeConsensusError struct {
+	Module string `cbor:"module,omitempty"`
+	Code   uint32 `cbor:"code,omitempty"`
+}
+
+// Deposit/Withdraw/Delegate events (codes 1-3).
+// See: _oasis-sdk/runtime-sdk/src/modules/consensus_accounts/mod.rs:109-137
+type cborRuntimeConsensusTransferEvent struct {
+	_      struct{} `cbor:",toarray"`
+	From   RuntimeAddress
+	Nonce  uint64
+	To     RuntimeAddress
+	Amount RuntimeBaseUnits
+	Error  *cborRuntimeConsensusError `cbor:"error,omitempty"`
+}
+
+// UndelegateStart event (code 4).
+// See: _oasis-sdk/runtime-sdk/src/modules/consensus_accounts/mod.rs:139-148
+type cborRuntimeConsensusUndelegateStartEvent struct {
+	_             struct{} `cbor:",toarray"`
+	From          RuntimeAddress
+	Nonce         uint64
+	To            RuntimeAddress
+	Shares        []byte
+	DebondEndTime uint64
+	Error         *cborRuntimeConsensusError `cbor:"error,omitempty"`
+}
+
+// UndelegateDone event (code 5).
+// See: _oasis-sdk/runtime-sdk/src/modules/consensus_accounts/mod.rs:150-156
+type cborRuntimeConsensusUndelegateDoneEvent struct {
+	_      struct{} `cbor:",toarray"`
+	From   RuntimeAddress
+	To     RuntimeAddress
+	Shares []byte
+	Amount RuntimeBaseUnits
 }

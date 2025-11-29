@@ -17,6 +17,12 @@ type EVMDataInfo struct {
 // See: _oasis-sdk/runtime-sdk/modules/evm/src/lib.rs:253-263 (Event::Log)
 // See: _oasis-sdk/client-sdk/go/modules/evm/types.go:56-61 (Event)
 type EVMEventInfo struct {
+	// Raw fields
+	RawDump  string `json:"raw_dump,omitempty"`
+	RawSize  int    `json:"raw_size"`
+	RawError string `json:"raw_error,omitempty"`
+
+	// Decoded fields
 	Address        string   `json:"address"`                    // H160 contract address (0x-prefixed hex)
 	TopicCount     int      `json:"topic_count"`                // Number of topics (0-4)
 	Topics         []string `json:"topics,omitempty"`           // H256 topics array (0x-prefixed hex)
@@ -29,31 +35,48 @@ type EVMEventInfo struct {
 // EVMTxInputInfo represents decoded EVM transaction input artifacts.
 // See: _oasis-core/go/runtime/transaction/transaction.go:126-140 (inputArtifacts)
 type EVMTxInputInfo struct {
-	TxHash      string       `json:"tx_hash"`                // Transaction hash (0x-prefixed hex)
-	BatchOrder  uint32       `json:"batch_order"`            // Order within batch
-	TxInputSize int          `json:"tx_input_size"`          // Raw input size
-	TxInputHex  string       `json:"tx_input_hex,omitempty"` // Truncated raw input (hex)
-	Method      string       `json:"method,omitempty"`       // SDK method (e.g., "evm.Call")
-	EVMCall     *EVMCallInfo `json:"evm_call,omitempty"`     // EVM-specific call details
+	// Raw fields
+	RawDump  string `json:"raw_dump,omitempty"`
+	RawSize  int    `json:"raw_size"`
+	RawError string `json:"raw_error,omitempty"`
+
+	// Decoded fields
+	TxHash     string              `json:"tx_hash"`           // Transaction hash (0x-prefixed hex)
+	BatchOrder uint32              `json:"batch_order"`       // Order within batch
+	Method     string              `json:"method,omitempty"`  // SDK method (e.g., "evm.Call")
+	EVMTx      *EVMTransactionInfo `json:"evm_tx,omitempty"`  // Decoded EVM transaction
 }
 
-// EVMCallInfo represents EVM-specific transaction call details.
-// See: _oasis-sdk/runtime-sdk/modules/evm/src/types.rs:10-16 (Call/Create)
-type EVMCallInfo struct {
-	Type     string `json:"type"`               // "call" or "create"
-	Address  string `json:"address,omitempty"`  // H160 target address (0x-prefixed hex)
-	Value    string `json:"value,omitempty"`    // U256 value in wei (decimal string)
-	DataSize int    `json:"data_size"`          // Size of call data or init code
-	DataHex  string `json:"data_hex,omitempty"` // Truncated raw data (0x-prefixed hex)
+// EVMTransactionInfo represents a decoded EVM transaction.
+type EVMTransactionInfo struct {
+	// Raw EVM transaction body bytes (CBOR)
+	RawDump  string `json:"raw_dump,omitempty"`
+	RawSize  int    `json:"raw_size"`
+	RawError string `json:"raw_error,omitempty"`
+
+	// Decoded EVM transaction fields
+	Type     string `json:"type"`                  // "call" or "create"
+	From     string `json:"from,omitempty"`        // 0x prefix
+	To       string `json:"to,omitempty"`          // 0x prefix
+	Value    string `json:"value,omitempty"`       // Wei as decimal string
+	GasLimit uint64 `json:"gas_limit,omitempty"`
+	GasPrice string `json:"gas_price,omitempty"`   // Wei as decimal string
+	Nonce    uint64 `json:"nonce,omitempty"`
+	DataSize int    `json:"data_size"`
+	DataDump string `json:"data_dump,omitempty"`   // 0x-hex
 }
 
 // EVMTxOutputInfo represents decoded EVM transaction output artifacts.
 // See: _oasis-core/go/runtime/transaction/transaction.go:142-150 (outputArtifacts)
 type EVMTxOutputInfo struct {
-	TxOutputSize int    `json:"tx_output_size"`         // Raw output size
-	TxOutputHex  string `json:"tx_output_hex,omitempty"` // Truncated raw output (hex)
-	Success      bool   `json:"success"`                // Transaction succeeded
-	ResultSize   int    `json:"result_size,omitempty"`  // Size of result data
-	ResultHex    string `json:"result_hex,omitempty"`   // Truncated raw result (0x-prefixed hex)
-	Error        string `json:"error,omitempty"`        // Execution error message if failed (kept in child)
+	// Raw fields
+	RawDump  string `json:"raw_dump,omitempty"`
+	RawSize  int    `json:"raw_size"`
+	RawError string `json:"raw_error,omitempty"`
+
+	// Decoded execution status fields
+	SuccessExecution bool   `json:"success"`
+	ResultSize       int    `json:"result_size,omitempty"`
+	ResultDump       string `json:"result_dump,omitempty"`
+	ErrorExecution   string `json:"error,omitempty"` // Execution error (application data, not decoding error)
 }

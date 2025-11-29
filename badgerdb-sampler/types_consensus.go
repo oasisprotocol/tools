@@ -18,28 +18,34 @@ import (
 // ConsensusBlockstoreKeyInfo represents a decoded consensus-blockstore key.
 // See: tendermint/store/store.go for key formats (H:, P:, C:, SC:, BH:)
 type ConsensusBlockstoreKeyInfo struct {
-	KeyType         string `json:"key_type"`                    // "blockstore_state", "block_meta", "block_part", "block_commit", "seen_commit", "block_hash", "unknown"
-	ConsensusHeight int64  `json:"consensus_height,omitempty"`  // For H:, C:, SC:, P: keys
-	PartIndex       int    `json:"part_index,omitempty"`        // For P: keys
-	Hash            string `json:"hash,omitempty"`              // For BH: keys
-	KeySize         int    `json:"key_size"`
-	KeyRaw          string `json:"key_raw,omitempty"`           // Original ASCII key
+	// Raw fields
+	KeyDump  string `json:"key_dump,omitempty"`
+	KeySize  int    `json:"key_size"`
+	KeyError string `json:"key_error,omitempty"`
+
+	// Decoded fields
+	KeyType         string `json:"key_type"`                   // "blockstore_state", "block_meta", "block_part", "block_commit", "seen_commit", "block_hash", "unknown"
+	ConsensusHeight int64  `json:"consensus_height,omitempty"` // For H:, C:, SC:, P: keys
+	PartIndex       int    `json:"part_index,omitempty"`       // For P: keys
+	Hash            string `json:"hash,omitempty"`             // For BH: keys
 }
 
 // ConsensusBlockstoreValueInfo represents a decoded consensus-blockstore value.
 // See: tendermint/proto/tendermint/store/types.proto (BlockStoreState)
 // See: tendermint/proto/tendermint/types/types.proto (BlockMeta, Part, Commit)
 type ConsensusBlockstoreValueInfo struct {
-	Timestamp      int64                     `json:"timestamp,omitempty"` // Unix timestamp from block meta
-	State          *ConsensusBlockStoreState `json:"state,omitempty"`
-	StateError     string                    `json:"state_error,omitempty"` // Error decoding state
-	BlockMeta      *ConsensusBlockMetaInfo   `json:"block_meta,omitempty"`
-	BlockMetaError string                    `json:"block_meta_error,omitempty"` // Error decoding block meta
-	Part           *ConsensusPartInfo        `json:"part,omitempty"`
-	PartError      string                    `json:"part_error,omitempty"` // Error decoding part
-	Commit         *ConsensusCommitInfo      `json:"commit,omitempty"`
-	CommitError    string                    `json:"commit_error,omitempty"` // Error decoding commit
-	HashHeight     int64                     `json:"hash_height,omitempty"` // For block_hash type
+	// Raw fields
+	RawDump  string `json:"raw_dump,omitempty"`
+	RawSize  int    `json:"raw_size"`
+	RawError string `json:"raw_error,omitempty"`
+
+	// Decoded fields
+	Timestamp  int64                     `json:"timestamp,omitempty"` // Unix timestamp from block meta
+	State      *ConsensusBlockStoreState `json:"state,omitempty"`
+	BlockMeta  *ConsensusBlockMetaInfo   `json:"block_meta,omitempty"`
+	Part       *ConsensusPartInfo        `json:"part,omitempty"`
+	Commit     *ConsensusCommitInfo      `json:"commit,omitempty"`
+	HashHeight int64                     `json:"hash_height,omitempty"` // For block_hash type
 }
 
 // ConsensusBlockStoreState represents BlockStoreState from tendermint.
@@ -82,23 +88,31 @@ type ConsensusCommitInfo struct {
 // ConsensusEvidenceKeyInfo represents a decoded consensus-evidence key.
 // See: tendermint/store/evidence/pool.go for key formats
 type ConsensusEvidenceKeyInfo struct {
+	// Raw fields
+	KeyDump  string `json:"key_dump,omitempty"`
+	KeySize  int    `json:"key_size"`
+	KeyError string `json:"key_error,omitempty"`
+
+	// Decoded fields
 	KeyType    string `json:"key_type"`
 	PrefixByte byte   `json:"prefix_byte,omitempty"`
-	KeySize    int    `json:"key_size"`
-	KeyHex     string `json:"key_hex,omitempty"` // hex
 }
 
 // ConsensusEvidenceValueInfo represents a decoded consensus-evidence value.
 // See: tendermint/proto/tendermint/types/evidence.proto (DuplicateVoteEvidence)
 type ConsensusEvidenceValueInfo struct {
-	ValueSize        int    `json:"value_size"`
-	ValueHex         string `json:"value_hex,omitempty"`          // Truncated hex dump
+	// Raw fields
+	RawDump  string `json:"raw_dump,omitempty"`
+	RawSize  int    `json:"raw_size"`
+	RawError string `json:"raw_error,omitempty"`
+
+	// Decoded fields
+	EvidenceType     string `json:"evidence_type,omitempty"`      // "duplicate_vote", "light_client_attack", "unknown"
 	VoteAHeight      int64  `json:"vote_a_height,omitempty"`
 	VoteBHeight      int64  `json:"vote_b_height,omitempty"`
-	EvidenceType     string `json:"evidence_type,omitempty"`      // "duplicate_vote", "light_client_attack", "unknown"
 	TotalVotingPower int64  `json:"total_voting_power,omitempty"`
 	ValidatorPower   int64  `json:"validator_power,omitempty"`
-	Timestamp        string `json:"timestamp,omitempty"`          // RFC3339 format
+	Timestamp        string `json:"timestamp,omitempty"` // RFC3339 format
 }
 
 // =============================================================================
@@ -108,38 +122,53 @@ type ConsensusEvidenceValueInfo struct {
 // ConsensusMkvsKeyInfo represents a decoded consensus-mkvs key.
 // See: _oasis-core/go/storage/mkvs/db/badger/badger.go:31-66
 type ConsensusMkvsKeyInfo struct {
-	KeySize         int    `json:"key_size"`
-	KeyHex          string `json:"key_hex,omitempty"`          // hex, truncated
+	// Raw fields
+	KeyDump  string `json:"key_dump,omitempty"`
+	KeySize  int    `json:"key_size"`
+	KeyError string `json:"key_error,omitempty"`
+
+	// Decoded fields
 	KeyType         string `json:"key_type"`                   // "node", "write_log", "roots_metadata", "root_updated_nodes", "metadata", "multipart_restore_log", "root_node", "unknown"
-	ConsensusHeight uint64 `json:"consensus_height,omitempty"` // For write_log, roots_metadata, root_updated_nodes
+	ConsensusHeight int64  `json:"consensus_height,omitempty"` // For write_log, roots_metadata, root_updated_nodes
 	Hash            string `json:"hash,omitempty"`             // hex, truncated (partial key data)
-	RootType        byte   `json:"root_type,omitempty"`
+	RootType        string `json:"root_type,omitempty"`
 }
 
 // ConsensusMkvsValueInfo represents a decoded consensus-mkvs value (node).
 // See: _oasis-core/go/storage/mkvs/node/node.go:26-32 (prefixes), 294-309 (InternalNode), 531-537 (LeafNode)
 type ConsensusMkvsValueInfo struct {
-	NodeType      string                     `json:"node_type"` // "leaf", "internal", "nil", "non_node", "unknown"
-	NodeSize      int                        `json:"node_size"` // Total MKVS node size
-	NodeHex       string                     `json:"node_hex,omitempty"` // Raw node dump (hex, truncated)
-	Leaf          *ConsensusMkvsLeafInfo     `json:"leaf,omitempty"`
-	LeafError     string                     `json:"leaf_error,omitempty"` // Error decoding leaf node
-	Internal      *ConsensusMkvsInternalInfo `json:"internal,omitempty"`
-	InternalError string                     `json:"internal_error,omitempty"` // Error decoding internal node
-	NodeError     string                     `json:"node_error,omitempty"` // Structural parsing error
+	// Raw fields
+	RawDump  string `json:"raw_dump,omitempty"`
+	RawSize  int    `json:"raw_size"`
+	RawError string `json:"raw_error,omitempty"`
+
+	// Node info
+	NodeType string                     `json:"node_type"` // "leaf", "internal", "nil", "non_node", "unknown"
+	Leaf     *ConsensusMkvsLeafInfo     `json:"leaf,omitempty"`
+	Internal *ConsensusMkvsInternalInfo `json:"internal,omitempty"`
 }
 
 // ConsensusMkvsLeafInfo represents a decoded MKVS LeafNode for consensus.
 // See: _oasis-core/go/storage/mkvs/node/node.go:531-537 (LeafNode)
 // See: _oasis-core/go/consensus/tendermint/apps/*/state/state.go (module prefixes)
 type ConsensusMkvsLeafInfo struct {
-	Module       string      `json:"module"`
-	KeySize      int         `json:"key_size"`
-	KeyHex       string      `json:"key_hex,omitempty"`       // hex, truncated
-	OasisAddress string      `json:"oasis_address,omitempty"` // bech32 oasis1... address if applicable
-	ValueSize    int         `json:"value_size"`
-	ValueHex     string      `json:"value_hex,omitempty"`     // hex, truncated
-	ValueFormatted interface{} `json:"value_formatted,omitempty"` // CBOR formatted output from formatCBOR()
+	// Leaf key (extracted from MKVS node)
+	KeyDump string `json:"key_dump,omitempty"`
+	KeySize int    `json:"key_size"`
+
+	// Decoded key fields
+	Module       string `json:"module"`
+	KeyType      string `json:"key_type,omitempty"`
+	OasisAddress string `json:"oasis_address,omitempty"` // bech32 oasis1... address if applicable
+
+	// Leaf value raw data
+	ValueDump  string `json:"value_dump,omitempty"`
+	ValueSize  int    `json:"value_size"`
+	ValueError string `json:"value_error,omitempty"`
+
+	// Decoded value
+	ValueType string      `json:"value_type,omitempty"`
+	Value     interface{} `json:"value,omitempty"`
 }
 
 // ConsensusMkvsInternalInfo represents a decoded MKVS InternalNode.
@@ -158,26 +187,30 @@ type ConsensusMkvsInternalInfo struct {
 // ConsensusStateKeyInfo represents a decoded consensus-state key.
 // See: tendermint/state/store.go for key formats (abciResponsesKey, validatorsKey, etc.)
 type ConsensusStateKeyInfo struct {
-	KeyType         string `json:"key_type"`                    // "abci_responses", "consensus_params", "validators", "state", "genesis", "text_key", "binary", "unknown"
-	KeySize         int    `json:"key_size"`
-	KeyHex          string `json:"key_hex,omitempty"`           // hex, truncated
-	ConsensusHeight int64  `json:"consensus_height,omitempty"`  // For abci_responses (extracted from key)
+	// Raw fields
+	KeyDump  string `json:"key_dump,omitempty"`
+	KeySize  int    `json:"key_size"`
+	KeyError string `json:"key_error,omitempty"`
+
+	// Decoded fields
+	KeyType         string `json:"key_type"`                   // "abci_responses", "consensus_params", "validators", "state", "genesis", "text_key", "binary", "unknown"
+	ConsensusHeight int64  `json:"consensus_height,omitempty"` // For abci_responses (extracted from key)
 	IsBinary        bool   `json:"is_binary,omitempty"`
 }
 
 // ConsensusStateValueInfo represents a decoded consensus-state value.
 // See: tendermint/proto/tendermint/state/types.proto (various state types)
 type ConsensusStateValueInfo struct {
-	ValueSize           int                `json:"value_size"`
-	ValueHex            string             `json:"value_hex,omitempty"` // Raw hex dump
-	ABCIResponse        *ConsensusABCIResponseInfo  `json:"abci_response,omitempty"` // For abci_responses
-	ABCIResponseError   string             `json:"abci_response_error,omitempty"` // Error decoding ABCI responses
-	ConsensusParams     *tmConsensusParams `json:"consensus_params,omitempty"` // For consensus_params
-	ConsensusParamsError string            `json:"consensus_params_error,omitempty"` // Error decoding consensus params
-	ConsensusValidators *tmValidatorSet    `json:"consensus_validators,omitempty"` // For validators
-	ValidatorsError     string             `json:"validators_error,omitempty"` // Error decoding validators
-	ConsensusState      *tmState           `json:"consensus_state,omitempty"` // For state
-	StateError          string             `json:"state_error,omitempty"` // Error decoding state
+	// Raw fields
+	RawDump  string `json:"raw_dump,omitempty"`
+	RawSize  int    `json:"raw_size"`
+	RawError string `json:"raw_error,omitempty"`
+
+	// Decoded content - only ONE populated
+	ABCIResponse        *ConsensusABCIResponseInfo `json:"abci_response,omitempty"`        // For abci_responses
+	ConsensusParams     *tmConsensusParams         `json:"consensus_params,omitempty"`     // For consensus_params
+	ConsensusValidators *tmValidatorSet            `json:"consensus_validators,omitempty"` // For validators
+	ConsensusState      *tmState                   `json:"consensus_state,omitempty"`      // For state
 }
 
 // ConsensusABCIResponseInfo represents decoded ABCI response summary.
@@ -285,10 +318,10 @@ type cborConsensusSignedTransaction struct {
 // cborConsensusInnerTransaction represents an unsigned consensus transaction.
 // See: _oasis-core/go/consensus/api/transaction/transaction.go:43-54
 type cborConsensusInnerTransaction struct {
-	Nonce  uint64
-	Fee    *cborConsensusFee
-	Method string
-	Body   cbor.RawMessage
+	Nonce  uint64             `json:"nonce"`
+	Fee    *cborConsensusFee  `json:"fee"`
+	Method string             `json:"method"`
+	Body   cbor.RawMessage    `json:"body"`
 }
 
 // cborConsensusFee represents transaction fee.

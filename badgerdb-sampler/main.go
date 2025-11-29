@@ -16,15 +16,9 @@ var BadgerVersion string
 
 // Sample contains both raw and decoded key/value information
 type Sample struct {
-	KeyRaw    string      `json:"key_raw"`
-	KeySize   int         `json:"key_size"`
 	KeyType   string      `json:"key_type"`
-	Key       interface{} `json:"key"`                   // Decoded key (renamed from Key)
-	KeyError  string      `json:"key_error,omitempty"`   // Error decoding key
-	ValueRaw  string      `json:"value_raw"`
-	ValueSize int         `json:"value_size"`
-	Value     interface{} `json:"value"`                 // Decoded value (renamed from Value)
-	ValueError string     `json:"value_error,omitempty"` // Error decoding value
+	Key       interface{} `json:"key"`
+	Value     interface{} `json:"value"`
 	Timestamp int64       `json:"timestamp,omitempty"`
 }
 
@@ -33,9 +27,10 @@ type DBStats struct {
 	DatabasePath    string         `json:"database_path"`
 	DatabaseType    string         `json:"database_type"`
 	BadgerDBVersion string         `json:"badgerdb_version"`
-	DatabaseSize    int64          `json:"database_size_bytes,omitempty"`
+	DatabaseSize    int64          `json:"database_size_bytes"`
 	SampleCount     int            `json:"sample_count"`
-	KeyTypeCounts   map[string]int `json:"key_type_counts,omitempty"`
+	KeyTypeCounts   map[string]int `json:"key_type_counts"`
+	ErrorCounts     map[string]int `json:"error_counts"`
 	Samples         []Sample       `json:"samples"`
 }
 
@@ -84,6 +79,7 @@ func main() {
 		BadgerDBVersion: BadgerVersion,
 		DatabaseSize:    dbSize,
 		KeyTypeCounts:   make(map[string]int),
+		ErrorCounts:     make(map[string]int),
 		Samples:         []Sample{},
 	}
 
@@ -92,6 +88,22 @@ func main() {
 	err = collectSamples(db, &stats, maxSamples)
 	if err != nil {
 		log.Fatalf("Error collecting samples: %v", err)
+	}
+
+	// Extract and count errors from all samples
+	fmt.Fprintf(os.Stderr, "Extracting errors from samples...\n")
+	for _, sample := range stats.Samples {
+		// Extract errors from key
+		keyErrors := extractErrors(sample.Key, "key", 10)
+		for _, errMsg := range keyErrors {
+			stats.ErrorCounts[errMsg]++
+		}
+
+		// Extract errors from value
+		valueErrors := extractErrors(sample.Value, "value", 10)
+		for _, errMsg := range valueErrors {
+			stats.ErrorCounts[errMsg]++
+		}
 	}
 
 	// Print results
@@ -174,69 +186,82 @@ func collectSamples(db *DB, stats *DBStats, maxSamples int) error {
 			key := item.Key()
 
 			sample := Sample{
-				KeyRaw:     truncateHex(key, TruncateLongSize),
-				KeySize:    len(key),
-				KeyType:    "unknown",
-				Key: nil,
+				KeyType: "unknown",
 			}
 
 			// Decode key based on database type
 			switch stats.DatabaseType {
 			case "consensus-blockstore":
 				keyInfo := decodeConsensusBlockstoreKey(key)
-				sample.KeyType = keyInfo.KeyType
 				sample.Key = keyInfo
+				sample.KeyType = keyInfo.KeyType
 			case "consensus-evidence":
 				keyInfo := decodeConsensusEvidenceKey(key)
-				sample.KeyType = keyInfo.KeyType
 				sample.Key = keyInfo
+				sample.KeyType = keyInfo.KeyType
 			case "consensus-mkvs":
 				keyInfo := decodeConsensusMkvsKey(key)
-				sample.KeyType = keyInfo.KeyType
 				sample.Key = keyInfo
+				sample.KeyType = keyInfo.KeyType
 			case "consensus-state":
 				keyInfo := decodeConsensusStateKey(key)
-				sample.KeyType = keyInfo.KeyType
 				sample.Key = keyInfo
+				sample.KeyType = keyInfo.KeyType
 			case "runtime-mkvs":
 				keyInfo := decodeRuntimeMkvsKey(key)
-				sample.KeyType = keyInfo.KeyType
 				sample.Key = keyInfo
+				sample.KeyType = keyInfo.KeyType
 			case "runtime-history":
 				keyInfo := decodeRuntimeHistoryKey(key)
-				sample.KeyType = keyInfo.KeyType
 				sample.Key = keyInfo
+				sample.KeyType = keyInfo.KeyType
 			}
 
 			// Fetch and decode value
-			err := item.Value(func(val []byte) error {
-				sample.ValueSize = len(val)
-				sample.ValueRaw = truncateHex(val, TruncateLongSize)
-				sample.Value = nil
-
-				// Decode value based on database type
-				switch stats.DatabaseType {
-				case "consensus-blockstore":
-					valueInfo := decodeConsensusBlockstoreValue(sample.KeyType, val)
-					sample.Value = valueInfo
-					sample.Timestamp = valueInfo.Timestamp
-				case "consensus-evidence":
-					value, err := decodeConsensusEvidenceValue(sample.KeyType, val)
-					sample.Value = value
-					sample.ValueError = err
-				case "consensus-mkvs":
+			switch stats.DatabaseType {
+			case "consensus-blockstore":
+				val, err := item.ValueCopy(nil)
+				if err != nil {
+					sample.Value = &ConsensusBlockstoreValueInfo{RawError: fmt.Sprintf("failed to read value: %v", err)}
+				} else {
+					sample.Value = decodeConsensusBlockstoreValue(sample.KeyType, val)
+					sample.Timestamp = sample.Value.(*ConsensusBlockstoreValueInfo).Timestamp
+				}
+			case "consensus-evidence":
+				val, err := item.ValueCopy(nil)
+				if err != nil {
+					sample.Value = &ConsensusEvidenceValueInfo{RawError: fmt.Sprintf("failed to read value: %v", err)}
+				} else {
+					sample.Value = decodeConsensusEvidenceValue(sample.KeyType, val)
+				}
+			case "consensus-mkvs":
+				val, err := item.ValueCopy(nil)
+				if err != nil {
+					sample.Value = &ConsensusMkvsValueInfo{RawError: fmt.Sprintf("failed to read value: %v", err)}
+				} else {
 					sample.Value = decodeConsensusMkvsValue(sample.KeyType, val)
-				case "consensus-state":
+				}
+			case "consensus-state":
+				val, err := item.ValueCopy(nil)
+				if err != nil {
+					sample.Value = &ConsensusStateValueInfo{RawError: fmt.Sprintf("failed to read value: %v", err)}
+				} else {
 					sample.Value = decodeConsensusStateValue(sample.KeyType, val)
-				case "runtime-mkvs":
+				}
+			case "runtime-mkvs":
+				val, err := item.ValueCopy(nil)
+				if err != nil {
+					sample.Value = &RuntimeMkvsValueInfo{RawError: fmt.Sprintf("failed to read value: %v", err)}
+				} else {
 					sample.Value = decodeRuntimeMkvsValue(sample.KeyType, val)
-				case "runtime-history":
+				}
+			case "runtime-history":
+				val, err := item.ValueCopy(nil)
+				if err != nil {
+					sample.Value = &RuntimeHistoryValueInfo{RawError: fmt.Sprintf("failed to read value: %v", err)}
+				} else {
 					sample.Value = decodeRuntimeHistoryValue(sample.KeyType, val)
 				}
-				return nil
-			})
-			if err != nil {
-				log.Printf("Error reading value for key %s: %v", sample.KeyRaw, err)
 			}
 
 			stats.Samples = append(stats.Samples, sample)

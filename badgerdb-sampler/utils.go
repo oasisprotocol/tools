@@ -1,16 +1,19 @@
 package main
 
 import (
+	"encoding/hex"
 	"fmt"
 	"math/big"
+	"reflect"
 	"strings"
+	"unicode"
 )
 
 const (
-	// TruncateHashSize is the default hex character limit for hash truncation
-	TruncateHashSize = 16
-	// TruncateLongSize is the default hex character limit for long data truncation
-	TruncateLongSize = 1000
+	// TruncateHashLen is the default hex character limit for hash truncation
+	TruncateHashLen = 16
+	// TruncateLongLen is the default hex character limit for long data truncation
+	TruncateLongLen = 1000
 )
 
 // extractModuleName extracts module name from MKVS leaf key and returns module:subtype description
@@ -36,9 +39,9 @@ func extractModuleName(key []byte) string {
 			} else if kind == 2 {
 				kindStr = "output"
 			}
-			return fmt.Sprintf("io_tx:%s (hash=%s)", kindStr, truncateHex(key[1:33], TruncateHashSize))
+			return fmt.Sprintf("io_tx:%s", kindStr)
 		}
-		return fmt.Sprintf("io_tx (hash=%s)", truncateHex(key[1:], TruncateHashSize))
+		return "io_tx"
 
 	case 'E': // Event tag prefix (0x45)
 		// Key format: 'E' + tag_key (variable, module name) + tx_hash (32 bytes)
@@ -75,7 +78,7 @@ func extractModuleName(key []byte) string {
 		subKey := key[end:]
 		return describeModuleKey(moduleName, subKey)
 	}
-	return truncateHex(key, TruncateHashSize)
+	return truncateHex(key, TruncateHashLen)
 }
 
 // describeModuleKey returns module name with sub-key type description
@@ -237,6 +240,23 @@ func isPrintableASCII(s string) bool {
 	return true
 }
 
+// formatRawValue formats data as ASCII or 0x-prefixed hex with truncation
+// Returns ASCII string if printable, otherwise 0x-prefixed hex
+func formatRawValue(data []byte, maxLen int) string {
+	if isPrintableASCII(string(data)) {
+		if len(data) > maxLen {
+			return string(data[:maxLen]) + "..."
+		}
+		return string(data)
+	}
+	// Hex formatting with 0x prefix
+	hexStr := hex.EncodeToString(data)
+	if len(hexStr) > maxLen {
+		return "0x" + hexStr[:maxLen] + "..."
+	}
+	return "0x" + hexStr
+}
+
 // truncateHex converts bytes to hex and truncates if too long.
 func truncateHex(data []byte, maxLen int) string {
 	hex := fmt.Sprintf("%x", data)
@@ -343,3 +363,75 @@ func bech32CreateChecksum(hrp string, data []int) []int {
 	return checksum
 }
 
+// extractErrors recursively extracts all non-empty fields ending with "Error" from a value.
+func extractErrors(v interface{}, prefix string, maxDepth int) []string {
+	if maxDepth <= 0 || v == nil {
+		return []string{}
+	}
+
+	val := reflect.ValueOf(v)
+	if !val.IsValid() {
+		return []string{}
+	}
+
+	// Dereference pointers
+	for val.Kind() == reflect.Ptr {
+		if val.IsNil() {
+			return []string{}
+		}
+		val = val.Elem()
+	}
+
+	results := []string{}
+	switch val.Kind() {
+	case reflect.Struct:
+		typ := val.Type()
+		for i := 0; i < val.NumField(); i++ {
+			field, fieldType := val.Field(i), typ.Field(i)
+			if !field.CanInterface() {
+				continue
+			}
+			jsonName := getJSONFieldName(fieldType)
+			// Collect error if field ends with "Error" and is non-empty string
+			if strings.HasSuffix(fieldType.Name, "Error") && field.Kind() == reflect.String {
+				if errStr := field.String(); errStr != "" {
+					results = append(results, fmt.Sprintf("%s.%s: %s", prefix, jsonName, errStr))
+				}
+			}
+			results = append(results, extractErrors(field.Interface(), prefix+"."+jsonName, maxDepth-1)...)
+		}
+	case reflect.Interface:
+		if !val.IsNil() {
+			results = extractErrors(val.Interface(), prefix, maxDepth-1)
+		}
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < val.Len(); i++ {
+			if elem := val.Index(i); elem.CanInterface() {
+				results = append(results, extractErrors(elem.Interface(), prefix+"[]", maxDepth-1)...)
+			}
+		}
+	}
+	return results
+}
+
+// getJSONFieldName extracts JSON field name from struct tag, falls back to snake_case
+func getJSONFieldName(field reflect.StructField) string {
+	if tag := field.Tag.Get("json"); tag != "" {
+		if name := strings.Split(tag, ",")[0]; name != "" {
+			return name
+		}
+	}
+	return toSnakeCase(field.Name)
+}
+
+// toSnakeCase converts PascalCase to snake_case
+func toSnakeCase(s string) string {
+	var result strings.Builder
+	for i, r := range s {
+		if i > 0 && unicode.IsUpper(r) {
+			result.WriteRune('_')
+		}
+		result.WriteRune(unicode.ToLower(r))
+	}
+	return result.String()
+}

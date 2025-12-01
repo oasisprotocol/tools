@@ -215,53 +215,75 @@ func collectSamples(db *DB, stats *DBStats, maxSamples int) error {
 				keyInfo := decodeRuntimeHistoryKey(key)
 				sample.Key = keyInfo
 				sample.KeyType = keyInfo.KeyType
+			default:
+				log.Fatalf("Unsupported database type: %s", stats.DatabaseType)
 			}
 
 			// Fetch and decode value
 			switch stats.DatabaseType {
 			case "consensus-blockstore":
+				valSize := int(item.ValueSize())
 				val, err := item.ValueCopy(nil)
 				if err != nil {
-					sample.Value = &ConsensusBlockstoreValueInfo{RawError: fmt.Sprintf("failed to read value: %v", err)}
+					sample.Value = &ConsensusBlockstoreValueInfo{RawError: fmt.Sprintf("failed to read value: %v", err), RawSize: valSize}
+				} else if len(val) != valSize {
+					sample.Value = &ConsensusBlockstoreValueInfo{RawError: fmt.Sprintf("value size mismatch (got: %d)", len(val)), RawSize: valSize}
 				} else {
 					sample.Value = decodeConsensusBlockstoreValue(sample.KeyType, val)
 					sample.Timestamp = sample.Value.(*ConsensusBlockstoreValueInfo).Timestamp
 				}
 			case "consensus-evidence":
+				valSize := int(item.ValueSize())
 				val, err := item.ValueCopy(nil)
 				if err != nil {
-					sample.Value = &ConsensusEvidenceValueInfo{RawError: fmt.Sprintf("failed to read value: %v", err)}
+					sample.Value = &ConsensusEvidenceValueInfo{RawError: fmt.Sprintf("failed to read value: %v", err), RawSize: valSize}
+				} else if len(val) != valSize {
+					sample.Value = &ConsensusEvidenceValueInfo{RawError: fmt.Sprintf("value size mismatch (got: %d)", len(val)), RawSize: valSize, RawDump: formatRawValue(val, TruncateLongLen)}
 				} else {
 					sample.Value = decodeConsensusEvidenceValue(sample.KeyType, val)
 				}
 			case "consensus-mkvs":
+				valSize := int(item.ValueSize())
 				val, err := item.ValueCopy(nil)
 				if err != nil {
-					sample.Value = &ConsensusMkvsValueInfo{RawError: fmt.Sprintf("failed to read value: %v", err)}
+					sample.Value = &ConsensusMkvsValueInfo{RawError: fmt.Sprintf("failed to read value: %v", err), RawSize: valSize}
+				} else if len(val) != valSize {
+					sample.Value = &ConsensusMkvsValueInfo{RawError: fmt.Sprintf("value size mismatch (got: %d)", len(val)), RawSize: valSize, RawDump: formatRawValue(val, TruncateLongLen)}
 				} else {
 					sample.Value = decodeConsensusMkvsValue(sample.KeyType, val)
 				}
 			case "consensus-state":
+				valSize := int(item.ValueSize())
 				val, err := item.ValueCopy(nil)
 				if err != nil {
-					sample.Value = &ConsensusStateValueInfo{RawError: fmt.Sprintf("failed to read value: %v", err)}
+					sample.Value = &ConsensusStateValueInfo{RawError: fmt.Sprintf("failed to read value: %v", err), RawSize: valSize}
+				} else if len(val) != valSize {
+					sample.Value = &ConsensusStateValueInfo{RawError: fmt.Sprintf("value size mismatch (got: %d)", len(val)), RawSize: valSize, RawDump: formatRawValue(val, TruncateLongLen)}
 				} else {
 					sample.Value = decodeConsensusStateValue(sample.KeyType, val)
 				}
 			case "runtime-mkvs":
+				valSize := int(item.ValueSize())
 				val, err := item.ValueCopy(nil)
 				if err != nil {
-					sample.Value = &RuntimeMkvsValueInfo{RawError: fmt.Sprintf("failed to read value: %v", err)}
+					sample.Value = &RuntimeMkvsValueInfo{RawError: fmt.Sprintf("failed to read value: %v", err), RawSize: valSize}
+				} else if len(val) != valSize {
+					sample.Value = &RuntimeMkvsValueInfo{RawError: fmt.Sprintf("value size mismatch (got: %d)", len(val)), RawSize: valSize, RawDump: formatRawValue(val, TruncateLongLen)}
 				} else {
 					sample.Value = decodeRuntimeMkvsValue(sample.KeyType, val)
 				}
 			case "runtime-history":
+				valSize := int(item.ValueSize())
 				val, err := item.ValueCopy(nil)
 				if err != nil {
-					sample.Value = &RuntimeHistoryValueInfo{RawError: fmt.Sprintf("failed to read value: %v", err)}
+					sample.Value = &RuntimeHistoryValueInfo{RawError: fmt.Sprintf("failed to read value: %v", err), RawSize: valSize}
+				} else if len(val) != valSize {
+					sample.Value = &RuntimeHistoryValueInfo{RawError: fmt.Sprintf("value size mismatch (got: %d)", len(val)), RawSize: valSize, RawDump: formatRawValue(val, TruncateLongLen)}
 				} else {
 					sample.Value = decodeRuntimeHistoryValue(sample.KeyType, val)
 				}
+			default:
+				log.Fatalf("Unsupported database type: %s", stats.DatabaseType)
 			}
 
 			stats.Samples = append(stats.Samples, sample)

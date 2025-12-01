@@ -12,6 +12,8 @@ import (
 // decodeEVMData decodes EVM module storage data.
 // See: _oasis-sdk/runtime-sdk/modules/evm/src/state.rs
 func decodeEVMData(module string, key []byte, value []byte) *EVMDataInfo {
+	info := &EVMDataInfo{}
+
 	// Module format: "evm:subtype" where subtype is extracted from key prefix
 	// The full key after module name starts with the storage type prefix
 
@@ -26,84 +28,83 @@ func decodeEVMData(module string, key []byte, value []byte) *EVMDataInfo {
 	}
 
 	if moduleNameEnd >= len(key) {
-		return nil // No data after module name
+		info.RawError = "no data after module name"
+		return info
 	}
 
 	subKey := key[moduleNameEnd:]
 	if len(subKey) < 1 {
-		return nil
+		info.RawError = "insufficient subkey data"
+		return info
 	}
 
-	evmInfo := &EVMDataInfo{}
 	storagePrefix := subKey[0]
 	data := subKey[1:]
 
 	switch storagePrefix {
 	case 0x01: // CODES: evm + 0x01 + H160 (address)
-		evmInfo.StorageType = "code"
+		info.StorageType = "code"
 		if len(data) >= 20 {
-			evmInfo.Address = "0x" + hex.EncodeToString(data[:20])
+			info.Address = "0x" + hex.EncodeToString(data[:20])
 			data = data[20:]
 		}
 		// Value is contract bytecode
-		evmInfo.CodeSize = len(value)
+		info.CodeSize = len(value)
 		if len(value) > 0 {
-			evmInfo.CodeHex = formatRawValue(value, TruncateLongLen)
+			info.CodeHex = formatRawValue(value, TruncateLongLen)
 		}
 
 	case 0x02: // STORAGES: evm + 0x02 + H160 (address) + H256 (slot)
-		evmInfo.StorageType = "storage"
+		info.StorageType = "storage"
 		if len(data) >= 20 {
-			evmInfo.Address = "0x" + hex.EncodeToString(data[:20])
+			info.Address = "0x" + hex.EncodeToString(data[:20])
 			data = data[20:]
 			if len(data) >= 32 {
-				evmInfo.StorageSlot = formatRawValue(data[:32], TruncateHashLen)
+				info.StorageSlot = formatRawValue(data[:32], TruncateHashLen)
 			}
 		}
 		// Value is H256 storage value
 		if len(value) == 32 {
-			evmInfo.StorageValue = formatRawValue(value, TruncateLongLen)
+			info.StorageValue = formatRawValue(value, TruncateLongLen)
 		}
 
 	case 0x03: // BLOCK_HASHES: evm + 0x03 + RuntimeHeight (uint64 BE)
-		evmInfo.StorageType = "block_hash"
+		info.StorageType = "block_hash"
 		if len(data) >= 8 {
-			evmInfo.RuntimeHeight = binary.BigEndian.Uint64(data[:8])
+			info.RuntimeHeight = binary.BigEndian.Uint64(data[:8])
 		}
 		// Value is H256 block hash
 		if len(value) == 32 {
-			evmInfo.BlockHash = formatRawValue(value, TruncateHashLen)
+			info.BlockHash = formatRawValue(value, TruncateHashLen)
 		}
 
 	case 0x04: // CONFIDENTIAL_STORAGES: evm + 0x04 + H160 (address) + H256 (slot)
-		evmInfo.StorageType = "confidential_storage"
+		info.StorageType = "confidential_storage"
 		if len(data) >= 20 {
-			evmInfo.Address = "0x" + hex.EncodeToString(data[:20])
+			info.Address = "0x" + hex.EncodeToString(data[:20])
 			data = data[20:]
 			if len(data) >= 32 {
-				evmInfo.StorageSlot = formatRawValue(data[:32], TruncateHashLen)
+				info.StorageSlot = formatRawValue(data[:32], TruncateHashLen)
 			}
 		}
 		// Value is encrypted - we can only show size
 		if len(value) > 0 {
-			evmInfo.StorageValue = fmt.Sprintf("<encrypted:%d bytes>", len(value))
+			info.StorageValue = fmt.Sprintf("<encrypted:%d bytes>", len(value))
 		}
 
 	default:
-		return nil // Unknown EVM storage type
+		info.RawError = fmt.Sprintf("unknown EVM storage type: 0x%02x", storagePrefix)
+		return info
 	}
 
-	return evmInfo
+	return info
 }
 
 // decodeEVMEvent decodes an EVM Log event from CBOR-encoded value.
 // See: _oasis-sdk/runtime-sdk/modules/evm/src/lib.rs:253-263
 // Returns (info, error) where error is a parsing error, not an execution error.
 func decodeEVMEvent(value []byte) *EVMEventInfo {
-	info := &EVMEventInfo{
-		RawDump: formatRawValue(value, TruncateLongLen),
-		RawSize: len(value),
-	}
+	info := &EVMEventInfo{}
 
 	// Value is CBOR: [event_code, {address, topics, data}]
 	var eventWrapper []interface{}
@@ -158,10 +159,7 @@ func decodeEVMEvent(value []byte) *EVMEventInfo {
 
 // decodeEVMTxInput decodes EVM transaction input artifacts.
 func decodeEVMTxInput(key []byte, value []byte) *EVMTxInputInfo {
-	info := &EVMTxInputInfo{
-		RawDump: formatRawValue(value, TruncateLongLen),
-		RawSize: len(value),
-	}
+	info := &EVMTxInputInfo{}
 
 	if len(key) >= 33 {
 		info.TxHash = formatRawValue(key[1:33], TruncateHashLen)
@@ -250,8 +248,37 @@ func decodeEVMTxInput(key []byte, value []byte) *EVMTxInputInfo {
 						bodyBytes = bodyVal
 					}
 				} else {
-					info.RawError = "nested map format: method missing"
-					return info
+					// Fallback A: Re-marshal map and try decoding as cborRuntimeCallMapFormat
+					if marshaled, err := cbor.Marshal(nestedMap); err == nil {
+						var callMap cborRuntimeCallMapFormat
+						if err := cbor.Unmarshal(marshaled, &callMap); err == nil {
+							method = callMap.Method
+							bodyBytes = callMap.Body
+						} else {
+							info.RawError = "nested map format: method missing"
+							return info
+						}
+					} else {
+						info.RawError = "nested map format: method missing"
+						return info
+					}
+				}
+			} else if nestedBytes, ok := nestedArray[0].([]byte); ok {
+				// Fallback B: Nested bytes - unwrap and decode
+				var callMap cborRuntimeCallMapFormat
+				if err := cbor.Unmarshal(nestedBytes, &callMap); err == nil {
+					method = callMap.Method
+					bodyBytes = callMap.Body
+				} else {
+					// Try array format as second attempt
+					var callArray cborRuntimeCallArrayFormat
+					if err := cbor.Unmarshal(nestedBytes, &callArray); err == nil {
+						method = callArray.Method
+						bodyBytes = callArray.Body
+					} else {
+						info.RawError = "nested array format: unable to decode nested bytes"
+						return info
+					}
 				}
 			} else {
 				info.RawError = "nested array format: invalid element type"
@@ -297,10 +324,7 @@ func decodeEVMTxInput(key []byte, value []byte) *EVMTxInputInfo {
 // decodeEVMTransactionFromCBOR decodes EVM transaction from raw CBOR bytes.
 // See: _oasis-sdk/runtime-sdk/modules/evm/src/types.rs for transaction structure
 func decodeEVMTransactionFromCBOR(bodyBytes []byte, isCreate bool) *EVMTransactionInfo {
-	info := &EVMTransactionInfo{
-		RawDump: formatRawValue(bodyBytes, TruncateLongLen),
-		RawSize: len(bodyBytes),
-	}
+	info := &EVMTransactionInfo{}
 
 	if isCreate {
 		info.Type = "create"
@@ -367,10 +391,7 @@ func decodeEVMTransactionFromCBOR(bodyBytes []byte, isCreate bool) *EVMTransacti
 // decodeEVMTxOutput decodes EVM transaction output artifacts.
 // Execution errors (transaction failures) are stored in info.ErrorExecution field.
 func decodeEVMTxOutput(value []byte) *EVMTxOutputInfo {
-	info := &EVMTxOutputInfo{
-		RawDump: formatRawValue(value, TruncateLongLen),
-		RawSize: len(value),
-	}
+	info := &EVMTxOutputInfo{}
 
 	var oa cborRuntimeOutputArtifacts
 	if err := cbor.Unmarshal(value, &oa); err != nil {

@@ -172,6 +172,8 @@ func decodeConsensusBlockstoreValue(keyType string, value []byte) *ConsensusBloc
 }
 
 // decodeConsensusEvidenceKey parses consensus-evidence key and returns structured info.
+// Key format: 0x01 (dbVersion) + 0x00/0x01 (committed/pending) + "HEIGHT_HEX/HASH_HEX"
+// See: cometbft/evidence/pool.go (keyCommitted, keyPending functions)
 func decodeConsensusEvidenceKey(key []byte) *ConsensusEvidenceKeyInfo {
 	info := &ConsensusEvidenceKeyInfo{
 		KeyDump: formatRawValue(key, TruncateLongLen),
@@ -189,15 +191,42 @@ func decodeConsensusEvidenceKey(key []byte) *ConsensusEvidenceKeyInfo {
 		return info
 	}
 
-	// Evidence DB is typically empty or uses simple key patterns
-	info.KeyType = fmt.Sprintf("type_%02x", key[1])
-	info.PrefixByte = key[1]
+	// Second byte is the evidence state prefix
+	prefixByte := key[1]
+	info.PrefixByte = prefixByte
+
+	switch prefixByte {
+	case 0x00:
+		info.KeyType = "committed"
+	case 0x01:
+		info.KeyType = "pending"
+	default:
+		info.KeyType = fmt.Sprintf("type_%02x", prefixByte)
+		return info
+	}
+
+	// Parse key suffix: "HEIGHT_HEX/HASH_HEX"
+	if len(key) > 2 {
+		keySuffix := string(key[2:])
+		parts := strings.Split(keySuffix, "/")
+		if len(parts) == 2 {
+			// Parse height from hex string (big-endian padded)
+			if h, err := strconv.ParseInt(parts[0], 16, 64); err == nil {
+				info.ConsensusHeight = h
+			}
+			// Store evidence hash
+			info.Hash = parts[1]
+		}
+	}
+
 	return info
 }
 
 // decodeConsensusEvidenceValue decodes evidence value and returns structured info.
-func decodeConsensusEvidenceValue(keyType string, value []byte) *ConsensusEvidenceValueInfo {
-	info := &ConsensusEvidenceValueInfo{
+// Committed evidence stores only Int64Value (height), pending evidence stores full Evidence protobuf.
+// See: cometbft/evidence/pool.go (addPendingEvidence, markEvidenceAsCommitted)
+func decodeConsensusEvidenceValue(keyType string, value []byte) (info *ConsensusEvidenceValueInfo) {
+	info = &ConsensusEvidenceValueInfo{
 		RawDump: formatRawValue(value, TruncateLongLen),
 		RawSize: len(value),
 	}
@@ -213,9 +242,49 @@ func decodeConsensusEvidenceValue(keyType string, value []byte) *ConsensusEviden
 		}
 	}()
 
-	// Try to decode as DuplicateVoteEvidence first
+	// Committed evidence only stores the block height as Int64Value
+	if keyType == "committed" {
+		var heightValue tmInt64Value
+		if err := proto.Unmarshal(value, &heightValue); err == nil {
+			info.EvidenceType = "committed_marker"
+			info.CommittedHeight = heightValue.Value
+			return info
+		} else {
+			info.RawError = fmt.Sprintf("failed to decode committed evidence Int64Value: %v", err)
+			info.EvidenceType = "unknown"
+			return info
+		}
+	}
+
+	// Pending evidence stores full evidence protobuf - try CometBFT DuplicateVoteEvidence first
+	cbSuccess := false
+	var cbDve cbDuplicateVoteEvidence
+	func() {
+		defer func() {
+			recover() // Silently catch panics from CometBFT unmarshal
+		}()
+		if err := proto.Unmarshal(value, &cbDve); err == nil && cbDve.VoteA != nil && cbDve.VoteB != nil {
+			cbSuccess = true
+		}
+	}()
+
+	if cbSuccess {
+		info.SchemaVersion = "cb-v0.37"
+		info.EvidenceType = "duplicate_vote"
+		info.VoteAHeight = cbDve.VoteA.Height
+		info.VoteBHeight = cbDve.VoteB.Height
+		info.TotalVotingPower = cbDve.TotalVotingPower
+		info.ValidatorPower = cbDve.ValidatorPower
+		if cbDve.Timestamp.Unix() > 0 {
+			info.Timestamp = cbDve.Timestamp.Format(time.RFC3339)
+		}
+		return info
+	}
+
+	// Fall back to Tendermint v0.34 DuplicateVoteEvidence
 	var dve tmDuplicateVoteEvidence
 	if err := proto.Unmarshal(value, &dve); err == nil && dve.VoteA != nil {
+		info.SchemaVersion = "tm-v0.34"
 		info.EvidenceType = "duplicate_vote"
 		info.VoteAHeight = dve.VoteA.Height
 		if dve.VoteB != nil {
@@ -229,7 +298,7 @@ func decodeConsensusEvidenceValue(keyType string, value []byte) *ConsensusEviden
 		return info
 	}
 
-	// Try to decode as LightClientAttackEvidence
+	// Try to decode as LightClientAttackEvidence (same for both versions)
 	var lca tmLightClientAttackEvidence
 	if err := proto.Unmarshal(value, &lca); err == nil && lca.ConflictingBlock != nil {
 		info.EvidenceType = "light_client_attack"
@@ -243,7 +312,7 @@ func decodeConsensusEvidenceValue(keyType string, value []byte) *ConsensusEviden
 	// If all parsing failed, show raw value
 	info.EvidenceType = "unknown"
 	if info.RawError == "" {
-		info.RawError = "unable to decode evidence format"
+		info.RawError = "failed to decode as any known evidence type"
 	}
 	return info
 }
@@ -349,6 +418,14 @@ func decodeConsensusMkvsValue(keyType string, value []byte) *ConsensusMkvsValueI
 		info.NodeType = "leaf"
 		data := value[1:]
 
+		// Try pre-v21.1.0 format (skip 8-byte Version field)
+		if len(data) >= 10 {
+			testKeySize := int(binary.LittleEndian.Uint16(data[8:10]))
+			if testKeySize > 0 && testKeySize <= 10000 && len(data) >= 10+testKeySize+4 {
+				data = data[8:]
+			}
+		}
+
 		if len(data) < 2 {
 			info.RawError = "key length missing"
 			return info
@@ -358,7 +435,7 @@ func decodeConsensusMkvsValue(keyType string, value []byte) *ConsensusMkvsValueI
 		data = data[2:]
 
 		if len(data) < keySize {
-			info.RawError = fmt.Sprintf("key truncated (expected %d bytes)", keySize)
+			info.RawError = fmt.Sprintf("key truncated")
 			return info
 		}
 
@@ -401,7 +478,7 @@ func decodeConsensusMkvsValue(keyType string, value []byte) *ConsensusMkvsValueI
 		leaf.ValueSize = valueSize
 
 		if len(data) < valueSize {
-			info.RawError = fmt.Sprintf("value truncated (expected %d bytes)", valueSize)
+			info.RawError = fmt.Sprintf("value truncated")
 			info.Leaf = leaf
 			return info
 		}
@@ -409,13 +486,51 @@ func decodeConsensusMkvsValue(keyType string, value []byte) *ConsensusMkvsValueI
 		leafValue := data[:valueSize]
 		leaf.ValueDump = formatRawValue(leafValue, TruncateLongLen)
 
-		// Try CBOR decode
-		var decoded interface{}
-		if err := cbor.Unmarshal(leafValue, &decoded); err == nil {
-			leaf.Value = formatCBORDetailed(decoded)
-			leaf.ValueType = "cbor"
+		// Deterministic format lookup based on key prefix
+		format, exists := GetConsensusMKVSFormat(key)
+		if !exists {
+			// Unknown key prefix - try CBOR as fallback
+			var decoded interface{}
+			if err := cbor.Unmarshal(leafValue, &decoded); err == nil {
+				leaf.Value = formatCBORDetailed(decoded)
+				leaf.ValueType = "cbor"
+			} else {
+				leaf.ValueError = fmt.Sprintf("unknown key prefix 0x%02x: %s", key[0], err.Error())
+				leaf.ValueType = "unknown"
+			}
 		} else {
-			leaf.ValueError = err.Error()
+			// Known format - decode deterministically
+			switch format.Format {
+			case "cbor":
+				var decoded interface{}
+				if err := cbor.Unmarshal(leafValue, &decoded); err == nil {
+					leaf.Value = formatCBORDetailed(decoded)
+					leaf.ValueType = "cbor"
+					leaf.CBOR = format.Type // Store expected type
+				} else {
+					leaf.ValueError = err.Error()
+					leaf.ValueType = "cbor_error"
+				}
+
+			case "binary":
+				// Raw binary data
+				leaf.ValueType = "raw_binary"
+				switch len(leafValue) {
+				case 32:
+					leaf.CBOR = fmt.Sprintf("%s (32-byte hash)", format.Description)
+				case 64:
+					leaf.CBOR = fmt.Sprintf("%s (64-byte signature)", format.Description)
+				case 65:
+					leaf.CBOR = fmt.Sprintf("%s (65-byte pubkey)", format.Description)
+				default:
+					leaf.CBOR = fmt.Sprintf("%s (%d bytes)", format.Description, len(leafValue))
+				}
+
+			case "empty":
+				// Index entry with empty value
+				leaf.ValueType = "empty"
+				leaf.CBOR = fmt.Sprintf("index entry: %s", format.Description)
+			}
 		}
 
 		info.Leaf = leaf
@@ -424,6 +539,14 @@ func decodeConsensusMkvsValue(keyType string, value []byte) *ConsensusMkvsValueI
 	case 0x01: // InternalNode
 		info.NodeType = "internal"
 		data := value[1:]
+
+		// Try pre-v21.1.0 format (skip 8-byte Version field)
+		if len(data) >= 10 {
+			testLabelBits := binary.LittleEndian.Uint16(data[8:10])
+			if testLabelBits <= 2048 && len(data) >= 10+(int(testLabelBits)+7)/8+1 {
+				data = data[8:]
+			}
+		}
 
 		if len(data) < 2 {
 			info.RawError = "label bits missing"
@@ -480,7 +603,7 @@ func decodeConsensusMkvsValue(keyType string, value []byte) *ConsensusMkvsValueI
 			}
 			data = data[valueLen:] // skip value
 		} else {
-			info.RawError = fmt.Sprintf("unexpected marker 0x%02x (expected 0x00 or 0x02)", data[0])
+			info.RawError = fmt.Sprintf("unexpected marker 0x%02x", data[0])
 			info.Internal = internal
 			return info
 		}
@@ -737,8 +860,8 @@ func decodeConsensusStateKey(key []byte) *ConsensusStateKeyInfo {
 }
 
 // decodeConsensusStateValue decodes state value and returns structured info.
-func decodeConsensusStateValue(keyType string, value []byte) *ConsensusStateValueInfo {
-	info := &ConsensusStateValueInfo{
+func decodeConsensusStateValue(keyType string, value []byte) (info *ConsensusStateValueInfo) {
+	info = &ConsensusStateValueInfo{
 		RawDump: formatRawValue(value, TruncateLongLen),
 		RawSize: len(value),
 	}
@@ -747,54 +870,174 @@ func decodeConsensusStateValue(keyType string, value []byte) *ConsensusStateValu
 		return info
 	}
 
-	// Add panic recovery for all protobuf unmarshaling operations
+	// Recover from protobuf panics that occur with schema mismatches
 	defer func() {
 		if r := recover(); r != nil {
-			// Protobuf panic occurred (likely schema mismatch)
-			if info.RawError == "" {
-				info.RawError = fmt.Sprintf("protobuf panic: %v", r)
-			}
+			info.RawError = fmt.Sprintf("protobuf panic: %v", r)
 		}
 	}()
 
 	switch keyType {
 	case "abci_responses":
-		// Try to decode ABCI responses (ResponseFinalizeBlock in newer Tendermint)
-		var resp tmABCIResponses
-		if err := proto.Unmarshal(value, &resp); err == nil {
-			// Validate that unmarshal actually decoded meaningful data
-			if resp.DeliverTxs == nil && resp.BeginBlock == nil && resp.EndBlock == nil {
-				info.RawError = "protobuf unmarshal succeeded but all fields are nil (schema mismatch)"
-			} else {
-				abciResponseInfo := &ConsensusABCIResponseInfo{}
+		// Try CometBFT FinalizeBlock format first
+		cbSuccess := false
+		var cbResp cbResponseFinalizeBlock
+		func() {
+			defer func() {
+				recover() // Silently catch panics from CometBFT unmarshal
+			}()
+			if err := proto.Unmarshal(value, &cbResp); err == nil && (len(cbResp.TxResults) > 0 || len(cbResp.Events) > 0 || len(cbResp.ValidatorUpdates) > 0) {
+				cbSuccess = true
+			}
+		}()
 
-				// Count deliver_tx results (transaction results)
-				if resp.DeliverTxs != nil {
-					abciResponseInfo.TxResultCount = len(resp.DeliverTxs)
-				}
+		if cbSuccess {
+			info.SchemaVersion = "cb-v0.37"
+			abciResponseInfo := &ConsensusABCIResponseInfo{}
 
-				// Count events from end_block
-				if resp.EndBlock != nil {
-					abciResponseInfo.EventCount = len(resp.EndBlock.Events)
-					if resp.EndBlock.ValidatorUpdates != nil {
-						abciResponseInfo.ValidatorUpdates = len(resp.EndBlock.ValidatorUpdates)
+			// Count tx results
+			if cbResp.TxResults != nil {
+				abciResponseInfo.TxResultCount = len(cbResp.TxResults)
+			}
+
+			// Count validator updates
+			if cbResp.ValidatorUpdates != nil {
+				abciResponseInfo.ValidatorUpdates = len(cbResp.ValidatorUpdates)
+			}
+
+			// Count event types from all sources
+			eventSummary := &ConsensusEventSummary{
+				EventTypeCounts: make(map[string]int),
+			}
+
+			// Decode transactions and collect events from TxResults
+			txSummary := &ConsensusTransactionSummary{
+				MethodCounts: make(map[string]int),
+			}
+
+			if cbResp.TxResults != nil {
+				for _, txResult := range cbResp.TxResults {
+					// Count and decode events
+					for _, event := range txResult.Events {
+						eventSummary.EventTypeCounts[event.Type]++
+
+						// Decode event if sample limit not reached
+						if decodedEvents, err := decodeConsensusEvent(event); err == nil {
+							for _, decodedEvent := range decodedEvents {
+								if len(eventSummary.Events) < 10 {
+									eventSummary.Events = append(eventSummary.Events, decodedEvent)
+								}
+							}
+						}
+					}
+
+					// Decode transaction if present
+					if len(txResult.Data) > 0 {
+						if decodedTx, err := decodeConsensusTransaction(txResult.Data); err == nil {
+							txSummary.MethodCounts[decodedTx.Method]++
+							// Only include first few transactions for sample
+							if len(txSummary.Transactions) < 10 {
+								txSummary.Transactions = append(txSummary.Transactions, decodedTx)
+							}
+						}
 					}
 				}
+			}
 
-				// Count event types from all sources
-				eventSummary := &ConsensusEventSummary{
-					EventTypeCounts: make(map[string]int),
+			// Events from root Events field (BeginBlock-style events in CometBFT)
+			if cbResp.Events != nil {
+				for _, event := range cbResp.Events {
+					eventSummary.EventTypeCounts[event.Type]++
+
+					// Decode event if sample limit not reached
+					if decodedEvents, err := decodeConsensusEvent(event); err == nil {
+						for _, decodedEvent := range decodedEvents {
+							if len(eventSummary.Events) < 10 {
+								eventSummary.Events = append(eventSummary.Events, decodedEvent)
+							}
+						}
+					}
 				}
+			}
 
-				// Decode transactions and collect events from DeliverTxs
-				txSummary := &ConsensusTransactionSummary{
-					MethodCounts: make(map[string]int),
-				}
+			abciResponseInfo.EventCount = len(cbResp.Events)
 
-				if resp.DeliverTxs != nil {
-					for _, txResult := range resp.DeliverTxs {
-						// Count and decode events
-						for _, event := range txResult.Events {
+			if len(txSummary.MethodCounts) > 0 {
+				abciResponseInfo.TransactionSummary = txSummary
+			}
+
+			if len(eventSummary.EventTypeCounts) > 0 {
+				abciResponseInfo.EventSummary = eventSummary
+			}
+
+			info.ABCIResponse = abciResponseInfo
+
+		} else {
+			// Fall back to Tendermint v0.34 format
+			var resp tmABCIResponses
+			if err := proto.Unmarshal(value, &resp); err == nil {
+				// Validate that unmarshal actually decoded meaningful data
+				if resp.DeliverTxs == nil && resp.BeginBlock == nil && resp.EndBlock == nil {
+					info.RawError = "protobuf unmarshal succeeded but all fields are nil (schema mismatch)"
+				} else {
+					info.SchemaVersion = "tm-v0.34"
+					abciResponseInfo := &ConsensusABCIResponseInfo{}
+
+					// Count deliver_tx results (transaction results)
+					if resp.DeliverTxs != nil {
+						abciResponseInfo.TxResultCount = len(resp.DeliverTxs)
+					}
+
+					// Count events from end_block
+					if resp.EndBlock != nil {
+						abciResponseInfo.EventCount = len(resp.EndBlock.Events)
+						if resp.EndBlock.ValidatorUpdates != nil {
+							abciResponseInfo.ValidatorUpdates = len(resp.EndBlock.ValidatorUpdates)
+						}
+					}
+
+					// Count event types from all sources
+					eventSummary := &ConsensusEventSummary{
+						EventTypeCounts: make(map[string]int),
+					}
+
+					// Decode transactions and collect events from DeliverTxs
+					txSummary := &ConsensusTransactionSummary{
+						MethodCounts: make(map[string]int),
+					}
+
+					if resp.DeliverTxs != nil {
+						for _, txResult := range resp.DeliverTxs {
+							// Count and decode events
+							for _, event := range txResult.Events {
+								eventSummary.EventTypeCounts[event.Type]++
+
+								// Decode event if sample limit not reached
+								if decodedEvents, err := decodeConsensusEvent(event); err == nil {
+									for _, decodedEvent := range decodedEvents {
+										if len(eventSummary.Events) < 10 {
+											eventSummary.Events = append(eventSummary.Events, decodedEvent)
+										}
+									}
+								}
+							}
+
+							// Decode transaction if present
+							if len(txResult.Data) > 0 {
+								if decodedTx, err := decodeConsensusTransaction(txResult.Data); err == nil {
+									txSummary.MethodCounts[decodedTx.Method]++
+									// Only include first few transactions for sample
+									if len(txSummary.Transactions) < 10 {
+										txSummary.Transactions = append(txSummary.Transactions, decodedTx)
+									}
+								}
+							}
+						}
+					}
+
+					// Events from BeginBlock
+					if resp.BeginBlock != nil {
+						for _, event := range resp.BeginBlock.Events {
 							eventSummary.EventTypeCounts[event.Type]++
 
 							// Decode event if sample limit not reached
@@ -806,76 +1049,45 @@ func decodeConsensusStateValue(keyType string, value []byte) *ConsensusStateValu
 								}
 							}
 						}
+					}
 
-						// Decode transaction if present
-						if len(txResult.Data) > 0 {
-							if decodedTx, err := decodeConsensusTransaction(txResult.Data); err == nil {
-								txSummary.MethodCounts[decodedTx.Method]++
-								// Only include first few transactions for sample
-								if len(txSummary.Transactions) < 10 {
-									txSummary.Transactions = append(txSummary.Transactions, decodedTx)
+					// Events from EndBlock
+					if resp.EndBlock != nil {
+						for _, event := range resp.EndBlock.Events {
+							eventSummary.EventTypeCounts[event.Type]++
+
+							// Decode event if sample limit not reached
+							if decodedEvents, err := decodeConsensusEvent(event); err == nil {
+								for _, decodedEvent := range decodedEvents {
+									if len(eventSummary.Events) < 10 {
+										eventSummary.Events = append(eventSummary.Events, decodedEvent)
+									}
 								}
 							}
 						}
 					}
-				}
 
-				// Events from BeginBlock
-				if resp.BeginBlock != nil {
-					for _, event := range resp.BeginBlock.Events {
-						eventSummary.EventTypeCounts[event.Type]++
 
-						// Decode event if sample limit not reached
-						if decodedEvents, err := decodeConsensusEvent(event); err == nil {
-							for _, decodedEvent := range decodedEvents {
-								if len(eventSummary.Events) < 10 {
-									eventSummary.Events = append(eventSummary.Events, decodedEvent)
-								}
-							}
-						}
+					if len(txSummary.MethodCounts) > 0 {
+						abciResponseInfo.TransactionSummary = txSummary
 					}
-				}
 
-				// Events from EndBlock
-				if resp.EndBlock != nil {
-					for _, event := range resp.EndBlock.Events {
-						eventSummary.EventTypeCounts[event.Type]++
-
-						// Decode event if sample limit not reached
-						if decodedEvents, err := decodeConsensusEvent(event); err == nil {
-							for _, decodedEvent := range decodedEvents {
-								if len(eventSummary.Events) < 10 {
-									eventSummary.Events = append(eventSummary.Events, decodedEvent)
-								}
-							}
-						}
+					if len(eventSummary.EventTypeCounts) > 0 {
+						abciResponseInfo.EventSummary = eventSummary
 					}
+
+					info.ABCIResponse = abciResponseInfo
 				}
-
-
-				if len(txSummary.MethodCounts) > 0 {
-					abciResponseInfo.TransactionSummary = txSummary
-				}
-
-				if len(eventSummary.EventTypeCounts) > 0 {
-					abciResponseInfo.EventSummary = eventSummary
-				}
-
-				info.ABCIResponse = abciResponseInfo
+			} else {
+				info.RawError = fmt.Sprintf("failed to decode as CometBFT or Tendermint v0.34 schema: %v", err)
 			}
-		} else {
-			info.RawError = fmt.Sprintf("failed to decode ABCI responses: %v", err)
 		}
 
 	case "consensus_params":
 		var params tmConsensusParams
 		if err := proto.Unmarshal(value, &params); err == nil {
-			// Validate that unmarshal decoded meaningful data
-			if params.Block == nil && params.Evidence == nil && params.Validator == nil && params.Version == nil {
-				info.RawError = "protobuf unmarshal succeeded but all fields are nil (schema mismatch)"
-			} else {
-				info.ConsensusParams = &params
-			}
+			// Fields are non-nullable structs, so always initialized
+			info.ConsensusParams = &params
 		} else {
 			info.RawError = fmt.Sprintf("failed to decode consensus params: %v", err)
 		}

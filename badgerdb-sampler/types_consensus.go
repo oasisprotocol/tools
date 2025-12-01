@@ -86,7 +86,8 @@ type ConsensusCommitInfo struct {
 // =============================================================================
 
 // ConsensusEvidenceKeyInfo represents a decoded consensus-evidence key.
-// See: tendermint/store/evidence/pool.go for key formats
+// Key format: dbVersion (0x01) + prefix (0x00=committed, 0x01=pending) + "HEIGHT_HEX/HASH_HEX"
+// See: cometbft/evidence/pool.go for key formats (keyCommitted, keyPending)
 type ConsensusEvidenceKeyInfo struct {
 	// Raw fields
 	KeyDump  string `json:"key_dump,omitempty"`
@@ -94,25 +95,31 @@ type ConsensusEvidenceKeyInfo struct {
 	KeyError string `json:"key_error,omitempty"`
 
 	// Decoded fields
-	KeyType    string `json:"key_type"`
-	PrefixByte byte   `json:"prefix_byte,omitempty"`
+	KeyType         string `json:"key_type"`             // "committed", "pending", "type_XX"
+	PrefixByte      byte   `json:"prefix_byte,omitempty"`
+	ConsensusHeight int64  `json:"consensus_height,omitempty"` // Extracted from key suffix
+	Hash            string `json:"hash,omitempty"`             // Evidence hash from key suffix
 }
 
 // ConsensusEvidenceValueInfo represents a decoded consensus-evidence value.
-// See: tendermint/proto/tendermint/types/evidence.proto (DuplicateVoteEvidence)
+// Committed evidence stores Int64Value (height only), pending stores full Evidence protobuf.
+// See: cometbft/evidence/pool.go (addPendingEvidence stores full evidence, markEvidenceAsCommitted stores height)
+// See: tendermint/proto/tendermint/types/evidence.proto (DuplicateVoteEvidence, LightClientAttackEvidence)
 type ConsensusEvidenceValueInfo struct {
 	// Raw fields
-	RawDump  string `json:"raw_dump,omitempty"`
-	RawSize  int    `json:"raw_size"`
-	RawError string `json:"raw_error,omitempty"`
+	RawDump       string `json:"raw_dump,omitempty"`
+	RawSize       int    `json:"raw_size"`
+	RawError      string `json:"raw_error,omitempty"`
+	SchemaVersion string `json:"schema_version,omitempty"` // "cb-v0.37", "tm-v0.34", "unknown"
 
 	// Decoded fields
-	EvidenceType     string `json:"evidence_type,omitempty"`      // "duplicate_vote", "light_client_attack", "unknown"
-	VoteAHeight      int64  `json:"vote_a_height,omitempty"`
-	VoteBHeight      int64  `json:"vote_b_height,omitempty"`
-	TotalVotingPower int64  `json:"total_voting_power,omitempty"`
-	ValidatorPower   int64  `json:"validator_power,omitempty"`
-	Timestamp        string `json:"timestamp,omitempty"` // RFC3339 format
+	EvidenceType     string `json:"evidence_type,omitempty"`      // "committed_marker", "duplicate_vote", "light_client_attack", "unknown"
+	CommittedHeight  int64  `json:"committed_height,omitempty"`   // For committed evidence (Int64Value)
+	VoteAHeight      int64  `json:"vote_a_height,omitempty"`      // For pending DuplicateVoteEvidence
+	VoteBHeight      int64  `json:"vote_b_height,omitempty"`      // For pending DuplicateVoteEvidence
+	TotalVotingPower int64  `json:"total_voting_power,omitempty"` // For pending evidence
+	ValidatorPower   int64  `json:"validator_power,omitempty"`    // For pending evidence
+	Timestamp        string `json:"timestamp,omitempty"`          // RFC3339 format (for pending evidence)
 }
 
 // =============================================================================
@@ -169,6 +176,7 @@ type ConsensusMkvsLeafInfo struct {
 	// Decoded value
 	ValueType string      `json:"value_type,omitempty"`
 	Value     interface{} `json:"value,omitempty"`
+	CBOR      string      `json:"cbor,omitempty"` // CBOR type description or format hint
 }
 
 // ConsensusMkvsInternalInfo represents a decoded MKVS InternalNode.
@@ -202,9 +210,10 @@ type ConsensusStateKeyInfo struct {
 // See: tendermint/proto/tendermint/state/types.proto (various state types)
 type ConsensusStateValueInfo struct {
 	// Raw fields
-	RawDump  string `json:"raw_dump,omitempty"`
-	RawSize  int    `json:"raw_size"`
-	RawError string `json:"raw_error,omitempty"`
+	RawDump       string `json:"raw_dump,omitempty"`
+	RawSize       int    `json:"raw_size"`
+	RawError      string `json:"raw_error,omitempty"`
+	SchemaVersion string `json:"schema_version,omitempty"` // "cometbft", "tendermint-v0.34", "unknown"
 
 	// Decoded content - only ONE populated
 	ABCIResponse        *ConsensusABCIResponseInfo `json:"abci_response,omitempty"`        // For abci_responses
@@ -439,34 +448,30 @@ type cborConsensusReclaimEscrowEvent struct {
 // =============================================================================
 // Source: github.com/tendermint/tendermint v0.34.21
 // These types are used only for protobuf deserialization - no tendermint business logic is needed.
-
-// protoMessage is a common base type that implements proto.Message interface.
-// All tendermint types embed this to satisfy proto.Unmarshal requirements.
-type protoMessage struct{}
-
-func (protoMessage) Reset()        {}
-func (protoMessage) String() string { return "" }
-func (protoMessage) ProtoMessage()  {}
+// For proto.Unmarshal() to work types need to implement proto.Message interface.
 
 // tmBlockStoreState represents BlockStoreState from tendermint/proto/tendermint/store/types.proto
 type tmBlockStoreState struct {
-	protoMessage
 	Base   int64 `protobuf:"varint,1,opt,name=base,proto3"`
 	Height int64 `protobuf:"varint,2,opt,name=height,proto3"`
 }
+func (m *tmBlockStoreState) Reset()         { *m = tmBlockStoreState{} }
+func (m *tmBlockStoreState) String() string { return "" }
+func (*tmBlockStoreState) ProtoMessage()    {}
 
 // tmBlockMeta represents BlockMeta from tendermint/proto/tendermint/types/types.proto
 type tmBlockMeta struct {
-	protoMessage
 	BlockID   tmBlockID `protobuf:"bytes,1,opt,name=block_id,json=blockId,proto3"`
 	BlockSize int64     `protobuf:"varint,2,opt,name=block_size,json=blockSize,proto3"`
 	Header    tmHeader  `protobuf:"bytes,3,opt,name=header,proto3"`
 	NumTxs    int64     `protobuf:"varint,4,opt,name=num_txs,json=numTxs,proto3"`
 }
+func (m *tmBlockMeta) Reset()         { *m = tmBlockMeta{} }
+func (m *tmBlockMeta) String() string { return "" }
+func (*tmBlockMeta) ProtoMessage()    {}
 
 // tmBlockID from tendermint/proto/tendermint/types/types.proto
 type tmBlockID struct {
-	protoMessage
 	Hash          []byte          `protobuf:"bytes,1,opt,name=hash,proto3"`
 	PartSetHeader tmPartSetHeader `protobuf:"bytes,2,opt,name=part_set_header,json=partSetHeader,proto3"`
 }
@@ -474,7 +479,6 @@ type tmBlockID struct {
 
 // tmPartSetHeader from tendermint/proto/tendermint/types/types.proto
 type tmPartSetHeader struct {
-	protoMessage
 	Total uint32 `protobuf:"varint,1,opt,name=total,proto3"`
 	Hash  []byte `protobuf:"bytes,2,opt,name=hash,proto3"`
 }
@@ -482,7 +486,6 @@ type tmPartSetHeader struct {
 
 // tmHeader from tendermint/proto/tendermint/types/types.proto
 type tmHeader struct {
-	protoMessage
 	Version            tmConsensus `protobuf:"bytes,1,opt,name=version,proto3"`
 	ChainID            string      `protobuf:"bytes,2,opt,name=chain_id,json=chainId,proto3"`
 	Height             int64       `protobuf:"varint,3,opt,name=height,proto3"`
@@ -502,7 +505,6 @@ type tmHeader struct {
 
 // tmConsensus from tendermint/proto/tendermint/types/types.proto
 type tmConsensus struct {
-	protoMessage
 	Block uint64 `protobuf:"varint,1,opt,name=block,proto3"`
 	App   uint64 `protobuf:"varint,2,opt,name=app,proto3"`
 }
@@ -510,16 +512,17 @@ type tmConsensus struct {
 
 // tmPart from tendermint/proto/tendermint/types/types.proto
 type tmPart struct {
-	protoMessage
 	Index uint32  `protobuf:"varint,1,opt,name=index,proto3"`
 	Bytes []byte  `protobuf:"bytes,2,opt,name=bytes,proto3"`
 	Proof tmProof `protobuf:"bytes,3,opt,name=proof,proto3"`
 }
+func (m *tmPart) Reset()         { *m = tmPart{} }
+func (m *tmPart) String() string { return "" }
+func (*tmPart) ProtoMessage()    {}
 
 
 // tmProof from tendermint/proto/tendermint/types/types.proto
 type tmProof struct {
-	protoMessage
 	Total    int64    `protobuf:"varint,1,opt,name=total,proto3"`
 	Index    int64    `protobuf:"varint,2,opt,name=index,proto3"`
 	LeafHash []byte   `protobuf:"bytes,3,opt,name=leaf_hash,json=leafHash,proto3"`
@@ -529,17 +532,18 @@ type tmProof struct {
 
 // tmCommit from tendermint/proto/tendermint/types/types.proto
 type tmCommit struct {
-	protoMessage
 	Height     int64         `protobuf:"varint,1,opt,name=height,proto3"`
 	Round      int32         `protobuf:"varint,2,opt,name=round,proto3"`
 	BlockID    tmBlockID     `protobuf:"bytes,3,opt,name=block_id,json=blockId,proto3"`
 	Signatures []tmCommitSig `protobuf:"bytes,4,rep,name=signatures,proto3"`
 }
+func (m *tmCommit) Reset()         { *m = tmCommit{} }
+func (m *tmCommit) String() string { return "" }
+func (*tmCommit) ProtoMessage()    {}
 
 
 // tmCommitSig from tendermint/proto/tendermint/types/types.proto
 type tmCommitSig struct {
-	protoMessage
 	BlockIDFlag      int32     `protobuf:"varint,1,opt,name=block_id_flag,json=blockIdFlag,proto3"`
 	ValidatorAddress []byte    `protobuf:"bytes,2,opt,name=validator_address,json=validatorAddress,proto3"`
 	Timestamp        time.Time `protobuf:"bytes,3,opt,name=timestamp,proto3,stdtime"`
@@ -547,20 +551,31 @@ type tmCommitSig struct {
 }
 
 
+// tmInt64Value from gogoproto/protobuf/wrappers.proto
+// Used by Tendermint to store committed evidence (just the height)
+type tmInt64Value struct {
+	Value int64 `protobuf:"varint,1,opt,name=value,proto3"`
+}
+func (m *tmInt64Value) Reset()         { *m = tmInt64Value{} }
+func (m *tmInt64Value) String() string { return "" }
+func (*tmInt64Value) ProtoMessage()    {}
+
+
 // tmDuplicateVoteEvidence from tendermint/proto/tendermint/types/evidence.proto
 type tmDuplicateVoteEvidence struct {
-	protoMessage
 	VoteA            *tmVote   `protobuf:"bytes,1,opt,name=vote_a,json=voteA,proto3"`
 	VoteB            *tmVote   `protobuf:"bytes,2,opt,name=vote_b,json=voteB,proto3"`
 	TotalVotingPower int64     `protobuf:"varint,3,opt,name=total_voting_power,json=totalVotingPower,proto3"`
 	ValidatorPower   int64     `protobuf:"varint,4,opt,name=validator_power,json=validatorPower,proto3"`
 	Timestamp        time.Time `protobuf:"bytes,5,opt,name=timestamp,proto3,stdtime"`
 }
+func (m *tmDuplicateVoteEvidence) Reset()         { *m = tmDuplicateVoteEvidence{} }
+func (m *tmDuplicateVoteEvidence) String() string { return "" }
+func (*tmDuplicateVoteEvidence) ProtoMessage()    {}
 
 
 // tmVote from tendermint/proto/tendermint/types/types.proto
 type tmVote struct {
-	protoMessage
 	Type             int32     `protobuf:"varint,1,opt,name=type,proto3"`
 	Height           int64     `protobuf:"varint,2,opt,name=height,proto3"`
 	Round            int32     `protobuf:"varint,3,opt,name=round,proto3"`
@@ -574,18 +589,19 @@ type tmVote struct {
 
 // tmLightClientAttackEvidence from tendermint/proto/tendermint/types/evidence.proto
 type tmLightClientAttackEvidence struct {
-	protoMessage
 	ConflictingBlock    *tmLightBlock   `protobuf:"bytes,1,opt,name=conflicting_block,json=conflictingBlock,proto3"`
 	CommonHeight        int64           `protobuf:"varint,2,opt,name=common_height,json=commonHeight,proto3"`
 	ByzantineValidators []*tmValidator  `protobuf:"bytes,3,rep,name=byzantine_validators,json=byzantineValidators,proto3"`
 	TotalVotingPower    int64           `protobuf:"varint,4,opt,name=total_voting_power,json=totalVotingPower,proto3"`
 	Timestamp           time.Time       `protobuf:"bytes,5,opt,name=timestamp,proto3,stdtime"`
 }
+func (m *tmLightClientAttackEvidence) Reset()         { *m = tmLightClientAttackEvidence{} }
+func (m *tmLightClientAttackEvidence) String() string { return "" }
+func (*tmLightClientAttackEvidence) ProtoMessage()    {}
 
 
 // tmLightBlock from tendermint/proto/tendermint/types/types.proto
 type tmLightBlock struct {
-	protoMessage
 	SignedHeader *tmSignedHeader `protobuf:"bytes,1,opt,name=signed_header,json=signedHeader,proto3"`
 	ValidatorSet *tmValidatorSet `protobuf:"bytes,2,opt,name=validator_set,json=validatorSet,proto3"`
 }
@@ -593,7 +609,6 @@ type tmLightBlock struct {
 
 // tmSignedHeader from tendermint/proto/tendermint/types/types.proto
 type tmSignedHeader struct {
-	protoMessage
 	Header *tmHeader `protobuf:"bytes,1,opt,name=header,proto3"`
 	Commit *tmCommit `protobuf:"bytes,2,opt,name=commit,proto3"`
 }
@@ -601,16 +616,17 @@ type tmSignedHeader struct {
 
 // tmValidatorSet from tendermint/proto/tendermint/types/validator.proto
 type tmValidatorSet struct {
-	protoMessage
 	Validators       []*tmValidator `protobuf:"bytes,1,rep,name=validators,proto3"`
 	Proposer         *tmValidator   `protobuf:"bytes,2,opt,name=proposer,proto3"`
 	TotalVotingPower int64          `protobuf:"varint,3,opt,name=total_voting_power,json=totalVotingPower,proto3"`
 }
+func (m *tmValidatorSet) Reset()         { *m = tmValidatorSet{} }
+func (m *tmValidatorSet) String() string { return "" }
+func (*tmValidatorSet) ProtoMessage()    {}
 
 
 // tmValidator from tendermint/proto/tendermint/types/validator.proto
 type tmValidator struct {
-	protoMessage
 	Address          []byte `protobuf:"bytes,1,opt,name=address,proto3"`
 	PubKey           []byte `protobuf:"bytes,2,opt,name=pub_key,json=pubKey,proto3"`
 	VotingPower      int64  `protobuf:"varint,3,opt,name=voting_power,json=votingPower,proto3"`
@@ -620,16 +636,16 @@ type tmValidator struct {
 
 // tmABCIResponses from tendermint/proto/tendermint/state/types.proto
 type tmABCIResponses struct {
-	protoMessage
 	DeliverTxs []*tmResponseDeliverTx `protobuf:"bytes,1,rep,name=deliver_txs,json=deliverTxs,proto3"`
 	EndBlock   *tmResponseEndBlock    `protobuf:"bytes,2,opt,name=end_block,json=endBlock,proto3"`
 	BeginBlock *tmResponseBeginBlock  `protobuf:"bytes,3,opt,name=begin_block,json=beginBlock,proto3"`
 }
-
+func (m *tmABCIResponses) Reset()         { *m = tmABCIResponses{} }
+func (m *tmABCIResponses) String() string { return "" }
+func (*tmABCIResponses) ProtoMessage()    {}
 
 // tmResponseDeliverTx from tendermint/proto/tendermint/abci/types.proto
 type tmResponseDeliverTx struct {
-	protoMessage
 	Code      uint32    `protobuf:"varint,1,opt,name=code,proto3"`
 	Data      []byte    `protobuf:"bytes,2,opt,name=data,proto3"`
 	Log       string    `protobuf:"bytes,3,opt,name=log,proto3"`
@@ -640,17 +656,14 @@ type tmResponseDeliverTx struct {
 	Codespace string    `protobuf:"bytes,8,opt,name=codespace,proto3"`
 }
 
-
 // tmResponseBeginBlock from tendermint/proto/tendermint/abci/types.proto
 type tmResponseBeginBlock struct {
-	protoMessage
 	Events []tmEvent `protobuf:"bytes,1,rep,name=events,proto3"`
 }
 
 
 // tmResponseEndBlock from tendermint/proto/tendermint/abci/types.proto
 type tmResponseEndBlock struct {
-	protoMessage
 	ValidatorUpdates      []tmValidatorUpdate  `protobuf:"bytes,1,rep,name=validator_updates,json=validatorUpdates,proto3"`
 	ConsensusParamUpdates *tmConsensusParams   `protobuf:"bytes,2,opt,name=consensus_param_updates,json=consensusParamUpdates,proto3"`
 	Events                []tmEvent            `protobuf:"bytes,3,rep,name=events,proto3"`
@@ -659,7 +672,6 @@ type tmResponseEndBlock struct {
 
 // tmEvent from tendermint/proto/tendermint/abci/types.proto
 type tmEvent struct {
-	protoMessage
 	Type       string              `protobuf:"bytes,1,opt,name=type,proto3"`
 	Attributes []tmEventAttribute  `protobuf:"bytes,2,rep,name=attributes,proto3"`
 }
@@ -667,7 +679,6 @@ type tmEvent struct {
 
 // tmEventAttribute from tendermint/proto/tendermint/abci/types.proto
 type tmEventAttribute struct {
-	protoMessage
 	Key   []byte `protobuf:"bytes,1,opt,name=key,proto3"`
 	Value []byte `protobuf:"bytes,2,opt,name=value,proto3"`
 	Index bool   `protobuf:"varint,3,opt,name=index,proto3"`
@@ -676,7 +687,6 @@ type tmEventAttribute struct {
 
 // tmValidatorUpdate from tendermint/proto/tendermint/abci/types.proto
 type tmValidatorUpdate struct {
-	protoMessage
 	PubKey []byte `protobuf:"bytes,1,opt,name=pub_key,json=pubKey,proto3"`
 	Power  int64  `protobuf:"varint,2,opt,name=power,proto3"`
 }
@@ -684,17 +694,18 @@ type tmValidatorUpdate struct {
 
 // tmConsensusParams from tendermint/proto/tendermint/types/params.proto
 type tmConsensusParams struct {
-	protoMessage
-	Block     *tmBlockParams     `protobuf:"bytes,1,opt,name=block,proto3"`
-	Evidence  *tmEvidenceParams  `protobuf:"bytes,2,opt,name=evidence,proto3"`
-	Validator *tmValidatorParams `protobuf:"bytes,3,opt,name=validator,proto3"`
-	Version   *tmVersionParams   `protobuf:"bytes,4,opt,name=version,proto3"`
+	Block     tmBlockParams     `protobuf:"bytes,1,opt,name=block,proto3"`
+	Evidence  tmEvidenceParams  `protobuf:"bytes,2,opt,name=evidence,proto3"`
+	Validator tmValidatorParams `protobuf:"bytes,3,opt,name=validator,proto3"`
+	Version   tmVersionParams   `protobuf:"bytes,4,opt,name=version,proto3"`
 }
+func (m *tmConsensusParams) Reset()         { *m = tmConsensusParams{} }
+func (m *tmConsensusParams) String() string { return "" }
+func (*tmConsensusParams) ProtoMessage()    {}
 
 
 // tmBlockParams from tendermint/proto/tendermint/types/params.proto
 type tmBlockParams struct {
-	protoMessage
 	MaxBytes int64 `protobuf:"varint,1,opt,name=max_bytes,json=maxBytes,proto3"`
 	MaxGas   int64 `protobuf:"varint,2,opt,name=max_gas,json=maxGas,proto3"`
 }
@@ -702,7 +713,6 @@ type tmBlockParams struct {
 
 // tmEvidenceParams from tendermint/proto/tendermint/types/params.proto
 type tmEvidenceParams struct {
-	protoMessage
 	MaxAgeNumBlocks int64 `protobuf:"varint,1,opt,name=max_age_num_blocks,json=maxAgeNumBlocks,proto3"`
 	MaxAgeDuration  int64 `protobuf:"varint,2,opt,name=max_age_duration,json=maxAgeDuration,proto3"`
 	MaxBytes        int64 `protobuf:"varint,3,opt,name=max_bytes,json=maxBytes,proto3"`
@@ -711,24 +721,191 @@ type tmEvidenceParams struct {
 
 // tmValidatorParams from tendermint/proto/tendermint/types/params.proto
 type tmValidatorParams struct {
-	protoMessage
 	PubKeyTypes []string `protobuf:"bytes,1,rep,name=pub_key_types,json=pubKeyTypes,proto3"`
 }
 
 
 // tmVersionParams from tendermint/proto/tendermint/types/params.proto
 type tmVersionParams struct {
-	protoMessage
 	AppVersion uint64 `protobuf:"varint,1,opt,name=app_version,json=appVersion,proto3"`
 }
 
 
 // tmState from tendermint/proto/tendermint/state/types.proto
 type tmState struct {
-	protoMessage
 	Version         uint64 `protobuf:"varint,1,opt,name=version,proto3"`
 	ChainID         string `protobuf:"bytes,2,opt,name=chain_id,json=chainId,proto3"`
 	InitialHeight   int64  `protobuf:"varint,3,opt,name=initial_height,json=initialHeight,proto3"`
 	LastBlockHeight int64  `protobuf:"varint,4,opt,name=last_block_height,json=lastBlockHeight,proto3"`
 }
+func (m *tmState) Reset()         { *m = tmState{} }
+func (m *tmState) String() string { return "" }
+func (*tmState) ProtoMessage()    {}
 
+
+// =============================================================================
+// CometBFT Protobuf Deserialization Types
+// =============================================================================
+// Source: github.com/cometbft/cometbft v0.37.x / v0.38.x
+// https://github.com/cometbft/cometbft/blob/main/proto/cometbft/abci/v1/types.proto
+// https://github.com/cometbft/cometbft/blob/main/proto/cometbft/types/v1/evidence.proto
+// For proto.Unmarshal() to work types need to implement proto.Message interface.
+
+// Type aliases for cb* types identical to tm* types
+// Source: cometbft/proto/cometbft/abci/v1/types.proto
+type cbEvent = tmEvent
+type cbEventAttribute = tmEventAttribute
+type cbValidatorUpdate = tmValidatorUpdate
+type cbConsensusParams = tmConsensusParams
+type cbBlockParams = tmBlockParams
+type cbEvidenceParams = tmEvidenceParams
+type cbValidatorParams = tmValidatorParams
+type cbVersionParams = tmVersionParams
+type cbBlockID = tmBlockID
+type cbPartSetHeader = tmPartSetHeader
+type cbInt64Value = tmInt64Value
+
+// cbResponseFinalizeBlock from CometBFT ABCI++ (v0.37+)
+// Source: cometbft/proto/cometbft/abci/v1/types.proto
+type cbResponseFinalizeBlock struct {
+	Events                []cbEvent           `protobuf:"bytes,1,rep,name=events,proto3"`
+	TxResults             []*cbExecTxResult   `protobuf:"bytes,2,rep,name=tx_results,json=txResults,proto3"`
+	ValidatorUpdates      []cbValidatorUpdate `protobuf:"bytes,3,rep,name=validator_updates,json=validatorUpdates,proto3"`
+	ConsensusParamUpdates *cbConsensusParams  `protobuf:"bytes,4,opt,name=consensus_param_updates,json=consensusParamUpdates,proto3"`
+	AppHash               []byte              `protobuf:"bytes,5,opt,name=app_hash,json=appHash,proto3"`
+}
+func (m *cbResponseFinalizeBlock) Reset()         { *m = cbResponseFinalizeBlock{} }
+func (m *cbResponseFinalizeBlock) String() string { return "" }
+func (*cbResponseFinalizeBlock) ProtoMessage()    {}
+
+// cbExecTxResult from CometBFT ABCI++ (v0.37+)
+// Source: cometbft/proto/cometbft/abci/v1/types.proto
+type cbExecTxResult struct {
+	Code      uint32    `protobuf:"varint,1,opt,name=code,proto3"`
+	Data      []byte    `protobuf:"bytes,2,opt,name=data,proto3"`
+	Log       string    `protobuf:"bytes,3,opt,name=log,proto3"`
+	Info      string    `protobuf:"bytes,4,opt,name=info,proto3"`
+	GasWanted int64     `protobuf:"varint,5,opt,name=gas_wanted,json=gasWanted,proto3"`
+	GasUsed   int64     `protobuf:"varint,6,opt,name=gas_used,json=gasUsed,proto3"`
+	Events    []cbEvent `protobuf:"bytes,7,rep,name=events,proto3"`
+	Codespace string    `protobuf:"bytes,8,opt,name=codespace,proto3"`
+}
+
+// cbDuplicateVoteEvidence from CometBFT
+// Source: cometbft/proto/cometbft/types/v1/evidence.proto
+type cbDuplicateVoteEvidence struct {
+	VoteA            *cbVote   `protobuf:"bytes,1,opt,name=vote_a,json=voteA,proto3"`
+	VoteB            *cbVote   `protobuf:"bytes,2,opt,name=vote_b,json=voteB,proto3"`
+	TotalVotingPower int64     `protobuf:"varint,3,opt,name=total_voting_power,json=totalVotingPower,proto3"`
+	ValidatorPower   int64     `protobuf:"varint,4,opt,name=validator_power,json=validatorPower,proto3"`
+	Timestamp        time.Time `protobuf:"bytes,5,opt,name=timestamp,proto3,stdtime"`
+}
+func (m *cbDuplicateVoteEvidence) Reset()         { *m = cbDuplicateVoteEvidence{} }
+func (m *cbDuplicateVoteEvidence) String() string { return "" }
+func (*cbDuplicateVoteEvidence) ProtoMessage()    {}
+
+// cbVote from CometBFT
+// Source: cometbft/proto/cometbft/types/v1/types.proto
+type cbVote struct {
+	Type             int32     `protobuf:"varint,1,opt,name=type,proto3"`
+	Height           int64     `protobuf:"varint,2,opt,name=height,proto3"`
+	Round            int32     `protobuf:"varint,3,opt,name=round,proto3"`
+	BlockID          *cbBlockID `protobuf:"bytes,4,opt,name=block_id,json=blockId,proto3"`
+	Timestamp        time.Time `protobuf:"bytes,5,opt,name=timestamp,proto3,stdtime"`
+	ValidatorAddress []byte    `protobuf:"bytes,6,opt,name=validator_address,json=validatorAddress,proto3"`
+	ValidatorIndex   int32     `protobuf:"varint,7,opt,name=validator_index,json=validatorIndex,proto3"`
+	Signature        []byte    `protobuf:"bytes,8,opt,name=signature,proto3"`
+}
+
+
+// =============================================================================
+// Consensus MKVS Format Mappings
+// =============================================================================
+
+// ConsensusMKVSFormat describes the value format for a consensus MKVS key prefix.
+type ConsensusMKVSFormat struct {
+	Format      string // "cbor", "binary", "empty"
+	Type        string // Go type name or description
+	Description string // Human-readable description
+}
+
+// consensusMKVSFormats maps consensus MKVS key prefixes to their value formats.
+// Extracted from _oasis-core/go/consensus/tendermint/apps/*/state/state.go
+// This provides deterministic decoding without heuristics.
+var consensusMKVSFormats = map[byte]ConsensusMKVSFormat{
+	// Registry Module (0x10-0x19)
+	// See: _oasis-core/go/consensus/tendermint/apps/registry/state/state.go
+	0x10: {Format: "cbor", Type: "entity.SignedEntity", Description: "signed entity"},
+	0x11: {Format: "cbor", Type: "node.MultiSignedNode", Description: "signed node"},
+	0x12: {Format: "empty", Type: "index", Description: "node by entity index"},
+	0x13: {Format: "cbor", Type: "registry.Runtime", Description: "runtime"},
+	0x14: {Format: "binary", Type: "signature.PublicKey", Description: "node by consensus address"},
+	0x15: {Format: "cbor", Type: "registry.NodeStatus", Description: "node status"},
+	0x16: {Format: "cbor", Type: "registry.ConsensusParameters", Description: "registry parameters"},
+	0x17: {Format: "binary", Type: "signature.PublicKey", Description: "key map"},
+	0x18: {Format: "cbor", Type: "registry.Runtime", Description: "suspended runtime"},
+	0x19: {Format: "empty", Type: "index", Description: "runtime by entity index"},
+
+	// Roothash Module (0x20-0x29)
+	// See: _oasis-core/go/consensus/tendermint/apps/roothash/state/state.go
+	0x20: {Format: "cbor", Type: "roothash.RuntimeState", Description: "runtime state"},
+	0x21: {Format: "cbor", Type: "roothash.ConsensusParameters", Description: "roothash parameters"},
+	0x22: {Format: "binary", Type: "common.Namespace", Description: "round timeout queue"},
+	0x24: {Format: "empty", Type: "index", Description: "evidence"},
+	0x25: {Format: "binary", Type: "hash.Hash", Description: "state root"},
+	0x26: {Format: "binary", Type: "hash.Hash", Description: "io root"},
+	0x27: {Format: "cbor", Type: "roothash.RoundResults", Description: "last round results"},
+	0x28: {Format: "cbor", Type: "message.IncomingMessageQueueMeta", Description: "incoming message queue meta"},
+	0x29: {Format: "cbor", Type: "message.IncomingMessage", Description: "incoming message queue"},
+
+	// Beacon Module (0x40-0x45)
+	// See: _oasis-core/go/consensus/tendermint/apps/beacon/state/state.go
+	0x40: {Format: "cbor", Type: "beacon.EpochTimeState", Description: "epoch current"},
+	0x41: {Format: "cbor", Type: "beacon.EpochTimeState", Description: "epoch future"},
+	0x42: {Format: "binary", Type: "beacon-32bytes", Description: "beacon value"},
+	0x43: {Format: "cbor", Type: "beacon.ConsensusParameters", Description: "beacon parameters"},
+	0x45: {Format: "cbor", Type: "beacon.EpochTime", Description: "pending mock epoch"},
+
+	// Staking Module (0x50-0x59)
+	// See: _oasis-core/go/consensus/tendermint/apps/staking/state/state.go
+	0x50: {Format: "cbor", Type: "staking.Account", Description: "account"},
+	0x51: {Format: "cbor", Type: "quantity.Quantity", Description: "total supply"},
+	0x52: {Format: "cbor", Type: "quantity.Quantity", Description: "common pool"},
+	0x53: {Format: "cbor", Type: "staking.Delegation", Description: "delegation"},
+	0x54: {Format: "cbor", Type: "staking.DebondingDelegation", Description: "debonding delegation"},
+	0x55: {Format: "empty", Type: "index", Description: "debonding queue"},
+	0x56: {Format: "cbor", Type: "staking.ConsensusParameters", Description: "staking parameters"},
+	0x57: {Format: "cbor", Type: "quantity.Quantity", Description: "last block fees"},
+	0x58: {Format: "cbor", Type: "EpochSigning", Description: "epoch signing"},
+	0x59: {Format: "cbor", Type: "quantity.Quantity", Description: "governance deposits"},
+
+	// Scheduler Module (0x60-0x63)
+	// See: _oasis-core/go/consensus/tendermint/apps/scheduler/state/state.go
+	0x60: {Format: "cbor", Type: "api.Committee", Description: "committee"},
+	0x61: {Format: "cbor", Type: "map[signature.PublicKey]int64", Description: "current validators"},
+	0x62: {Format: "cbor", Type: "map[signature.PublicKey]int64", Description: "pending validators"},
+	0x63: {Format: "cbor", Type: "api.ConsensusParameters", Description: "scheduler parameters"},
+
+	// Keymanager Module (0x70)
+	// See: _oasis-core/go/consensus/tendermint/apps/keymanager/state/state.go
+	0x70: {Format: "cbor", Type: "api.Status", Description: "keymanager status"},
+
+	// Governance Module (0x80-0x85)
+	// See: _oasis-core/go/consensus/tendermint/apps/governance/state/state.go
+	0x80: {Format: "cbor", Type: "uint64", Description: "next proposal identifier"},
+	0x81: {Format: "cbor", Type: "governance.Proposal", Description: "proposals"},
+	0x82: {Format: "empty", Type: "index", Description: "active proposals"},
+	0x83: {Format: "cbor", Type: "governance.Vote", Description: "votes"},
+	0x84: {Format: "empty", Type: "index", Description: "pending upgrades"},
+	0x85: {Format: "cbor", Type: "governance.ConsensusParameters", Description: "governance parameters"},
+}
+
+// GetConsensusMKVSFormat returns the format metadata for a consensus MKVS key.
+// Returns (format, true) if the key prefix is known, (empty, false) otherwise.
+func GetConsensusMKVSFormat(key []byte) (ConsensusMKVSFormat, bool) {
+	if len(key) == 0 {
+		return ConsensusMKVSFormat{}, false
+	}
+	format, exists := consensusMKVSFormats[key[0]]
+	return format, exists
+}

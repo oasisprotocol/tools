@@ -3,6 +3,7 @@ package main
 // EVMDataInfo represents decoded EVM storage data.
 // See: _oasis-sdk/runtime-sdk/modules/evm/src/state.rs
 type EVMDataInfo struct {
+	RawError      string `json:"raw_error,omitempty"`
 	StorageType   string `json:"storage_type"`              // "code", "storage", "block_hash", "confidential_storage"
 	Address       string `json:"address,omitempty"`         // H160 (20 bytes) - contract address (0x-prefixed hex)
 	StorageSlot   string `json:"storage_slot,omitempty"`    // H256 (32 bytes) - storage slot (0x-prefixed hex, truncated)
@@ -17,12 +18,7 @@ type EVMDataInfo struct {
 // See: _oasis-sdk/runtime-sdk/modules/evm/src/lib.rs:253-263 (Event::Log)
 // See: _oasis-sdk/client-sdk/go/modules/evm/types.go:56-61 (Event)
 type EVMEventInfo struct {
-	// Raw fields
-	RawDump  string `json:"raw_dump,omitempty"`
-	RawSize  int    `json:"raw_size"`
-	RawError string `json:"raw_error,omitempty"`
-
-	// Decoded fields
+	RawError       string `json:"raw_error,omitempty"`
 	Address        string   `json:"address"`                    // H160 contract address (0x-prefixed hex)
 	TopicCount     int      `json:"topic_count"`                // Number of topics (0-4)
 	Topics         []string `json:"topics,omitempty"`           // H256 topics array (0x-prefixed hex)
@@ -35,12 +31,7 @@ type EVMEventInfo struct {
 // EVMTxInputInfo represents decoded EVM transaction input artifacts.
 // See: _oasis-core/go/runtime/transaction/transaction.go:126-140 (inputArtifacts)
 type EVMTxInputInfo struct {
-	// Raw fields
-	RawDump  string `json:"raw_dump,omitempty"`
-	RawSize  int    `json:"raw_size"`
-	RawError string `json:"raw_error,omitempty"`
-
-	// Decoded fields
+	RawError   string `json:"raw_error,omitempty"`
 	TxHash     string              `json:"tx_hash"`           // Transaction hash (0x-prefixed hex)
 	BatchOrder uint32              `json:"batch_order"`       // Order within batch
 	Method     string              `json:"method,omitempty"`  // SDK method (e.g., "evm.Call")
@@ -49,12 +40,7 @@ type EVMTxInputInfo struct {
 
 // EVMTransactionInfo represents a decoded EVM transaction.
 type EVMTransactionInfo struct {
-	// Raw EVM transaction body bytes (CBOR)
-	RawDump  string `json:"raw_dump,omitempty"`
-	RawSize  int    `json:"raw_size"`
 	RawError string `json:"raw_error,omitempty"`
-
-	// Decoded EVM transaction fields
 	Type     string `json:"type"`                  // "call" or "create"
 	From     string `json:"from,omitempty"`        // 0x prefix
 	To       string `json:"to,omitempty"`          // 0x prefix
@@ -69,12 +55,7 @@ type EVMTransactionInfo struct {
 // EVMTxOutputInfo represents decoded EVM transaction output artifacts.
 // See: _oasis-core/go/runtime/transaction/transaction.go:142-150 (outputArtifacts)
 type EVMTxOutputInfo struct {
-	// Raw fields
-	RawDump  string `json:"raw_dump,omitempty"`
-	RawSize  int    `json:"raw_size"`
 	RawError string `json:"raw_error,omitempty"`
-
-	// Decoded execution status fields
 	SuccessExecution bool   `json:"success"`
 	ResultSize       int    `json:"result_size,omitempty"`
 	ResultDump       string `json:"result_dump,omitempty"`

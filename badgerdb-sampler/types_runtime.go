@@ -322,3 +322,69 @@ type cborRuntimeConsensusUndelegateDoneEvent struct {
 	Shares []byte
 	Amount RuntimeBaseUnits
 }
+
+
+// =============================================================================
+// Runtime Module State Format Mappings
+// =============================================================================
+
+// RuntimeModuleStateFormat describes runtime module state value formats.
+type RuntimeModuleStateFormat struct {
+	Format      string // "cbor", "binary", "wasm"
+	Type        string // Type name or description
+	Description string
+}
+
+// runtimeModuleStateFormats maps module state keys to expected formats.
+// Extracted from _oasis-sdk/runtime-sdk/modules/*/src/state.rs
+var runtimeModuleStateFormats = map[string]map[byte]RuntimeModuleStateFormat{
+	"evm": {
+		// _oasis-sdk/runtime-sdk/modules/evm/src/state.rs:10
+		0x01: {Format: "binary", Type: "Vec<u8>", Description: "contract code"},
+		// _oasis-sdk/runtime-sdk/modules/evm/src/state.rs:12
+		0x02: {Format: "binary", Type: "H256", Description: "storage slot"},
+		// _oasis-sdk/runtime-sdk/modules/evm/src/state.rs:14
+		0x03: {Format: "binary", Type: "H256", Description: "block hash"},
+		// _oasis-sdk/runtime-sdk/modules/evm/src/state.rs:17
+		0x04: {Format: "binary", Type: "ConfidentialValue", Description: "confidential storage"},
+	},
+	"accounts": {
+		// _oasis-sdk/runtime-sdk/modules/accounts/src/state.rs
+		0x01: {Format: "cbor", Type: "types.AccountInfo", Description: "account"},
+		0x02: {Format: "cbor", Type: "types.AccountBalances", Description: "balances"},
+		0x03: {Format: "cbor", Type: "Quantity", Description: "total supply"},
+	},
+	"contracts": {
+		// _oasis-sdk/runtime-sdk/modules/contracts/src/state.rs
+		0x01: {Format: "cbor", Type: "u64", Description: "next code ID"},
+		0x02: {Format: "cbor", Type: "u64", Description: "next instance ID"},
+		0x03: {Format: "cbor", Type: "types.Code", Description: "code info"},
+		0x04: {Format: "cbor", Type: "types.Instance", Description: "instance info"},
+		0x05: {Format: "cbor", Type: "store.Value", Description: "instance state"},
+		0xFF: {Format: "wasm", Type: "Vec<u8>", Description: "WASM bytecode"},
+	},
+	"core": {
+		// _oasis-sdk/runtime-sdk/src/modules/core/state.rs
+		0x01: {Format: "cbor", Type: "types.Metadata", Description: "metadata"},
+		0x02: {Format: "cbor", Type: "MessageHandlers", Description: "message handlers"},
+		0x03: {Format: "cbor", Type: "EpochTime", Description: "last epoch"},
+		0x04: {Format: "cbor", Type: "Quantity", Description: "min gas price"},
+	},
+	"consensus_accounts": {
+		// _oasis-sdk/runtime-sdk/modules/consensus_accounts/src/state.rs
+		0x01: {Format: "cbor", Type: "types.Delegation", Description: "delegations"},
+		0x02: {Format: "cbor", Type: "types.UndelegationReceipt", Description: "undelegations"},
+		0x03: {Format: "cbor", Type: "QueueEntry", Description: "undelegation queue"},
+		0x04: {Format: "cbor", Type: "types.Receipt", Description: "receipts"},
+	},
+}
+
+// GetRuntimeModuleStateFormat returns format for a module state key.
+func GetRuntimeModuleStateFormat(module string, subPrefix byte) (RuntimeModuleStateFormat, bool) {
+	if moduleFmts, exists := runtimeModuleStateFormats[module]; exists {
+		if format, exists := moduleFmts[subPrefix]; exists {
+			return format, true
+		}
+	}
+	return RuntimeModuleStateFormat{}, false
+}

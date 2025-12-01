@@ -80,6 +80,14 @@ func decodeRuntimeMkvsValue(keyType string, value []byte) *RuntimeMkvsValueInfo 
 		info.NodeType = "leaf"
 		data := value[1:]
 
+		// Try pre-v21.1.0 format (skip 8-byte Version field)
+		if len(data) >= 10 {
+			testKeySize := int(binary.LittleEndian.Uint16(data[8:10]))
+			if testKeySize > 0 && testKeySize <= 10000 && len(data) >= 10+testKeySize+4 {
+				data = data[8:]
+			}
+		}
+
 		if len(data) < 2 {
 			info.RawError = "key length missing"
 			return info
@@ -128,6 +136,14 @@ func decodeRuntimeMkvsValue(keyType string, value []byte) *RuntimeMkvsValueInfo 
 	case 0x01: // InternalNode: [2-byte labelBits LE][label][leaf/nil marker][hashes]
 		info.NodeType = "internal"
 		data := value[1:]
+
+		// Try pre-v21.1.0 format (skip 8-byte Version field)
+		if len(data) >= 10 {
+			testLabelBits := binary.LittleEndian.Uint16(data[8:10])
+			if testLabelBits <= 2048 && len(data) >= 10+(int(testLabelBits)+7)/8+1 {
+				data = data[8:]
+			}
+		}
 
 		if len(data) < 2 {
 			info.RawError = "label bits missing"
@@ -308,6 +324,31 @@ func decodeRuntimeLeafValue(module string, key []byte, value []byte) *RuntimeLea
 		ValueDump: formatRawValue(value, TruncateLongLen),
 		ValueSize: len(value),
 		ValueType: "unknown", // default
+	}
+
+	// Extract module name and subprefix for format lookup
+	modName := module
+	if idx := strings.Index(module, ":"); idx > 0 {
+		modName = module[:idx]
+	}
+	var subPrefix byte
+	if len(modName) < len(key) {
+		subPrefix = key[len(modName)]
+	}
+
+	// Check lookup table for deterministic format handling
+	format, exists := GetRuntimeModuleStateFormat(modName, subPrefix)
+	if exists {
+		info.ValueType = format.Description
+		switch format.Format {
+		case "binary":
+			info.CBOR = fmt.Sprintf("%s (%d bytes)", format.Type, len(value))
+			return info
+		case "wasm":
+			info.CBOR = fmt.Sprintf("wasm bytecode (%d bytes)", len(value))
+			return info
+		// case "cbor": fall through to existing CBOR decode logic below
+		}
 	}
 
 	// Check for EVM module data

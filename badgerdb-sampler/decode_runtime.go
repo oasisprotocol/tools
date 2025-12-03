@@ -97,7 +97,8 @@ func decodeRuntimeMkvsValue(keyType string, value []byte) *RuntimeMkvsValueInfo 
 		data = data[2:]
 
 		if len(data) < keySize {
-			info.RawError = fmt.Sprintf("key truncated (expected %d bytes)", keySize)
+			info.RawError = fmt.Sprintf("key truncated (expected %s, got %s)",
+				formatApproxSize(keySize), formatApproxSize(len(data)))
 			return info
 		}
 
@@ -123,7 +124,8 @@ func decodeRuntimeMkvsValue(keyType string, value []byte) *RuntimeMkvsValueInfo 
 		data = data[4:]
 
 		if len(data) < valueSize {
-			info.RawError = fmt.Sprintf("value truncated (expected %d bytes)", valueSize)
+			info.RawError = fmt.Sprintf("value truncated (expected %s, got %s)",
+				formatApproxSize(valueSize), formatApproxSize(len(data)))
 			info.Leaf = leaf
 			return info
 		}
@@ -155,7 +157,8 @@ func decodeRuntimeMkvsValue(keyType string, value []byte) *RuntimeMkvsValueInfo 
 
 		labelBytes := (int(labelBits) + 7) / 8
 		if len(data) < labelBytes+1 {
-			info.RawError = "label truncated"
+			info.RawError = fmt.Sprintf("label truncated (expected %s, got %s)",
+			formatApproxSize(labelBytes+1), formatApproxSize(len(data)))
 			info.Internal = &RuntimeMkvsInternalInfo{LabelBits: labelBits}
 			return info
 		}
@@ -163,19 +166,57 @@ func decodeRuntimeMkvsValue(keyType string, value []byte) *RuntimeMkvsValueInfo 
 		data = data[labelBytes:] // skip label
 
 		internal := &RuntimeMkvsInternalInfo{LabelBits: labelBits}
-		hasLeaf := data[0] == 0x00
-		internal.HasLeaf = hasLeaf
 
-		if !hasLeaf {
+		// Check for embedded leaf node or nil marker
+		if len(data) < 1 {
+			info.RawError = "missing leaf/nil marker"
+			info.Internal = internal
+			return info
+		}
+
+		if data[0] == 0x02 { // NilNode marker - no embedded leaf
+			internal.HasLeaf = false
 			data = data[1:] // skip nil marker
-			// Extract child hashes
-			if len(data) >= 32 {
-				internal.LeftHash = formatRawValue(data[:32], TruncateHashLen)
-				data = data[32:]
+		} else if data[0] == 0x00 { // LeafNode prefix - embedded leaf present
+			internal.HasLeaf = true
+			// Skip embedded leaf: prefix(1) + keyLen(2) + key + valueLen(4) + value
+			data = data[1:] // skip prefix
+			if len(data) < 2 {
+				info.RawError = "embedded leaf key length missing"
+				info.Internal = internal
+				return info
 			}
-			if len(data) >= 32 {
-				internal.RightHash = formatRawValue(data[:32], TruncateHashLen)
+			keyLen := binary.LittleEndian.Uint16(data[0:2])
+			data = data[2:]
+			if len(data) < int(keyLen)+4 {
+				info.RawError = fmt.Sprintf("embedded leaf truncated (expected %s, got %s)",
+				formatApproxSize(int(keyLen)+4), formatApproxSize(len(data)))
+				info.Internal = internal
+				return info
 			}
+			data = data[keyLen:] // skip key
+			valueLen := binary.LittleEndian.Uint32(data[0:4])
+			data = data[4:]
+			if len(data) < int(valueLen) {
+				info.RawError = fmt.Sprintf("embedded leaf value truncated (expected %s, got %s)",
+				formatApproxSize(int(valueLen)), formatApproxSize(len(data)))
+				info.Internal = internal
+				return info
+			}
+			data = data[valueLen:] // skip value
+		} else {
+			info.RawError = fmt.Sprintf("unexpected marker 0x%02x", data[0])
+			info.Internal = internal
+			return info
+		}
+
+		// Read left and right hashes
+		if len(data) >= 32 {
+			internal.LeftHash = formatRawValue(data[:32], TruncateHashLen)
+			data = data[32:]
+		}
+		if len(data) >= 32 {
+			internal.RightHash = formatRawValue(data[:32], TruncateHashLen)
 		}
 
 		info.Internal = internal

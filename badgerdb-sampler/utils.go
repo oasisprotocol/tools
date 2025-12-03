@@ -435,3 +435,23 @@ func toSnakeCase(s string) string {
 	}
 	return result.String()
 }
+
+// formatApproxSize returns approximate size string for error messages.
+// Rounds to first significant digit: 23→~20, 234→~200, 2345→~2K, 23456→~20K
+func formatApproxSize(size int) string {
+	if size < 10 {
+		return fmt.Sprintf("~%d", size)
+	} else if size < 100 {
+		return fmt.Sprintf("~%d", (size/10)*10)
+	} else if size < 1000 {
+		return fmt.Sprintf("~%d", (size/100)*100)
+	} else if size < 10000 {
+		return fmt.Sprintf("~%dK", size/1000)
+	} else if size < 100000 {
+		return fmt.Sprintf("~%dK", (size/10000)*10)
+	} else if size < 1000000 {
+		return fmt.Sprintf("~%dK", (size/100000)*100)
+	} else {
+		return fmt.Sprintf("~%dM", size/1000000)
+	}
+}

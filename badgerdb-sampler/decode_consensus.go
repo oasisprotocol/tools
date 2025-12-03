@@ -435,7 +435,8 @@ func decodeConsensusMkvsValue(keyType string, value []byte) *ConsensusMkvsValueI
 		data = data[2:]
 
 		if len(data) < keySize {
-			info.RawError = fmt.Sprintf("key truncated")
+			info.RawError = fmt.Sprintf("key truncated (expected %s, got %s)",
+				formatApproxSize(keySize), formatApproxSize(len(data)))
 			return info
 		}
 
@@ -478,7 +479,8 @@ func decodeConsensusMkvsValue(keyType string, value []byte) *ConsensusMkvsValueI
 		leaf.ValueSize = valueSize
 
 		if len(data) < valueSize {
-			info.RawError = fmt.Sprintf("value truncated")
+			info.RawError = fmt.Sprintf("value truncated (expected %s, got %s)",
+				formatApproxSize(valueSize), formatApproxSize(len(data)))
 			info.Leaf = leaf
 			return info
 		}
@@ -558,7 +560,8 @@ func decodeConsensusMkvsValue(keyType string, value []byte) *ConsensusMkvsValueI
 
 		labelBytes := (int(labelBits) + 7) / 8
 		if len(data) < labelBytes+1 {
-			info.RawError = "label truncated"
+			info.RawError = fmt.Sprintf("label truncated (expected %s, got %s)",
+			formatApproxSize(labelBytes+1), formatApproxSize(len(data)))
 			info.Internal = &ConsensusMkvsInternalInfo{LabelBits: labelBits}
 			return info
 		}
@@ -589,7 +592,8 @@ func decodeConsensusMkvsValue(keyType string, value []byte) *ConsensusMkvsValueI
 			keyLen := binary.LittleEndian.Uint16(data[0:2])
 			data = data[2:]
 			if len(data) < int(keyLen)+4 {
-				info.RawError = "embedded leaf truncated"
+				info.RawError = fmt.Sprintf("embedded leaf truncated (expected %s, got %s)",
+				formatApproxSize(int(keyLen)+4), formatApproxSize(len(data)))
 				info.Internal = internal
 				return info
 			}
@@ -597,7 +601,8 @@ func decodeConsensusMkvsValue(keyType string, value []byte) *ConsensusMkvsValueI
 			valueLen := binary.LittleEndian.Uint32(data[0:4])
 			data = data[4:]
 			if len(data) < int(valueLen) {
-				info.RawError = "embedded leaf value truncated"
+				info.RawError = fmt.Sprintf("embedded leaf value truncated (expected %s, got %s)",
+				formatApproxSize(int(valueLen)), formatApproxSize(len(data)))
 				info.Internal = internal
 				return info
 			}

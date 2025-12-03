@@ -90,22 +90,6 @@ func main() {
 		log.Fatalf("Error collecting samples: %v", err)
 	}
 
-	// Extract and count errors from all samples
-	fmt.Fprintf(os.Stderr, "Extracting errors from samples...\n")
-	for _, sample := range stats.Samples {
-		// Extract errors from key
-		keyErrors := extractErrors(sample.Key, "key", 10)
-		for _, errMsg := range keyErrors {
-			stats.ErrorCounts[errMsg]++
-		}
-
-		// Extract errors from value
-		valueErrors := extractErrors(sample.Value, "value", 10)
-		for _, errMsg := range valueErrors {
-			stats.ErrorCounts[errMsg]++
-		}
-	}
-
 	// Print results
 	fmt.Printf("Results:\n")
 	output, err := json.MarshalIndent(stats, "", "  ")
@@ -227,7 +211,7 @@ func collectSamples(db *DB, stats *DBStats, maxSamples int) error {
 				if err != nil {
 					sample.Value = &ConsensusBlockstoreValueInfo{RawError: fmt.Sprintf("failed to read value: %v", err), RawSize: valSize}
 				} else if len(val) != valSize {
-					sample.Value = &ConsensusBlockstoreValueInfo{RawError: fmt.Sprintf("value size mismatch (got: %d)", len(val)), RawSize: valSize}
+					sample.Value = &ConsensusBlockstoreValueInfo{RawError: fmt.Sprintf("value size mismatch (expected: %s, got: %s)", formatApproxSize(valSize), formatApproxSize(len(val))), RawSize: valSize, RawDump: formatRawValue(val, TruncateLongLen)}
 				} else {
 					sample.Value = decodeConsensusBlockstoreValue(sample.KeyType, val)
 					sample.Timestamp = sample.Value.(*ConsensusBlockstoreValueInfo).Timestamp
@@ -238,7 +222,7 @@ func collectSamples(db *DB, stats *DBStats, maxSamples int) error {
 				if err != nil {
 					sample.Value = &ConsensusEvidenceValueInfo{RawError: fmt.Sprintf("failed to read value: %v", err), RawSize: valSize}
 				} else if len(val) != valSize {
-					sample.Value = &ConsensusEvidenceValueInfo{RawError: fmt.Sprintf("value size mismatch (got: %d)", len(val)), RawSize: valSize, RawDump: formatRawValue(val, TruncateLongLen)}
+					sample.Value = &ConsensusEvidenceValueInfo{RawError: fmt.Sprintf("value size mismatch (expected: %s, got: %s)", formatApproxSize(valSize), formatApproxSize(len(val))), RawSize: valSize, RawDump: formatRawValue(val, TruncateLongLen)}
 				} else {
 					sample.Value = decodeConsensusEvidenceValue(sample.KeyType, val)
 				}
@@ -248,7 +232,7 @@ func collectSamples(db *DB, stats *DBStats, maxSamples int) error {
 				if err != nil {
 					sample.Value = &ConsensusMkvsValueInfo{RawError: fmt.Sprintf("failed to read value: %v", err), RawSize: valSize}
 				} else if len(val) != valSize {
-					sample.Value = &ConsensusMkvsValueInfo{RawError: fmt.Sprintf("value size mismatch (got: %d)", len(val)), RawSize: valSize, RawDump: formatRawValue(val, TruncateLongLen)}
+					sample.Value = &ConsensusMkvsValueInfo{RawError: fmt.Sprintf("value size mismatch (expected: %s, got: %s)", formatApproxSize(valSize), formatApproxSize(len(val))), RawSize: valSize, RawDump: formatRawValue(val, TruncateLongLen)}
 				} else {
 					sample.Value = decodeConsensusMkvsValue(sample.KeyType, val)
 				}
@@ -258,7 +242,7 @@ func collectSamples(db *DB, stats *DBStats, maxSamples int) error {
 				if err != nil {
 					sample.Value = &ConsensusStateValueInfo{RawError: fmt.Sprintf("failed to read value: %v", err), RawSize: valSize}
 				} else if len(val) != valSize {
-					sample.Value = &ConsensusStateValueInfo{RawError: fmt.Sprintf("value size mismatch (got: %d)", len(val)), RawSize: valSize, RawDump: formatRawValue(val, TruncateLongLen)}
+					sample.Value = &ConsensusStateValueInfo{RawError: fmt.Sprintf("value size mismatch (expected: %s, got: %s)", formatApproxSize(valSize), formatApproxSize(len(val))), RawSize: valSize, RawDump: formatRawValue(val, TruncateLongLen)}
 				} else {
 					sample.Value = decodeConsensusStateValue(sample.KeyType, val)
 				}
@@ -268,7 +252,7 @@ func collectSamples(db *DB, stats *DBStats, maxSamples int) error {
 				if err != nil {
 					sample.Value = &RuntimeMkvsValueInfo{RawError: fmt.Sprintf("failed to read value: %v", err), RawSize: valSize}
 				} else if len(val) != valSize {
-					sample.Value = &RuntimeMkvsValueInfo{RawError: fmt.Sprintf("value size mismatch (got: %d)", len(val)), RawSize: valSize, RawDump: formatRawValue(val, TruncateLongLen)}
+					sample.Value = &RuntimeMkvsValueInfo{RawError: fmt.Sprintf("value size mismatch (expected: %s, got: %s)", formatApproxSize(valSize), formatApproxSize(len(val))), RawSize: valSize, RawDump: formatRawValue(val, TruncateLongLen)}
 				} else {
 					sample.Value = decodeRuntimeMkvsValue(sample.KeyType, val)
 				}
@@ -278,12 +262,24 @@ func collectSamples(db *DB, stats *DBStats, maxSamples int) error {
 				if err != nil {
 					sample.Value = &RuntimeHistoryValueInfo{RawError: fmt.Sprintf("failed to read value: %v", err), RawSize: valSize}
 				} else if len(val) != valSize {
-					sample.Value = &RuntimeHistoryValueInfo{RawError: fmt.Sprintf("value size mismatch (got: %d)", len(val)), RawSize: valSize, RawDump: formatRawValue(val, TruncateLongLen)}
+					sample.Value = &RuntimeHistoryValueInfo{RawError: fmt.Sprintf("value size mismatch (expected: %s, got: %s)", formatApproxSize(valSize), formatApproxSize(len(val))), RawSize: valSize, RawDump: formatRawValue(val, TruncateLongLen)}
 				} else {
 					sample.Value = decodeRuntimeHistoryValue(sample.KeyType, val)
 				}
 			default:
 				log.Fatalf("Unsupported database type: %s", stats.DatabaseType)
+			}
+
+			// Extract and count errors from key
+			keyErrors := extractErrors(sample.Key, "key", 10)
+			for _, errMsg := range keyErrors {
+				stats.ErrorCounts[errMsg]++
+			}
+
+			// Extract and count errors from value
+			valueErrors := extractErrors(sample.Value, "value", 10)
+			for _, errMsg := range valueErrors {
+				stats.ErrorCounts[errMsg]++
 			}
 
 			stats.Samples = append(stats.Samples, sample)

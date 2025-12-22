@@ -19,7 +19,7 @@ post_run() {
 # mainnet-20201001-20201118 (BadgerDB v2)
 (
 DATA_DIR="/snapshots/mainnet/20201001-20201118/consensus.dir"
-OUTPUT_DIR="./outputs/testnet-$(basename $(dirname "${DATA_DIR}"))"
+OUTPUT_DIR="./outputs/mainnet-$(basename $(dirname "${DATA_DIR}"))"
 pre_run
 $SAMPLER_V2 consensus-blockstore-v2 $DATA_DIR/tendermint/data/blockstore.badger.db $OUTPUT_DIR/consensus-blockstore-v2.json > $OUTPUT_DIR/consensus-blockstore-v2.log 2>&1 || true
 $SAMPLER_V2 consensus-evidence-v2 $DATA_DIR/tendermint/data/evidence.badger.db $OUTPUT_DIR/consensus-evidence-v2.json > $OUTPUT_DIR/consensus-evidence-v2.log 2>&1 || true
@@ -31,7 +31,7 @@ post_run
 # mainnet-20201118-20210428 (BadgerDB v2)
 (
 DATA_DIR="/snapshots/mainnet/20201118-20210428/consensus.dir"
-OUTPUT_DIR="./outputs/testnet-$(basename $(dirname "${DATA_DIR}"))"
+OUTPUT_DIR="./outputs/mainnet-$(basename $(dirname "${DATA_DIR}"))"
 pre_run
 $SAMPLER_V2 consensus-blockstore-v2 $DATA_DIR/tendermint/data/blockstore.badger.db $OUTPUT_DIR/consensus-blockstore-v2.json > $OUTPUT_DIR/consensus-blockstore-v2.log 2>&1 || true
 $SAMPLER_V2 consensus-evidence-v2 $DATA_DIR/tendermint/data/evidence.badger.db $OUTPUT_DIR/consensus-evidence-v2.json > $OUTPUT_DIR/consensus-evidence-v2.log 2>&1 || true
@@ -43,7 +43,7 @@ post_run
 # mainnet-20210428-20220411 (BadgerDB v3)
 (
 DATA_DIR="/snapshots/mainnet/20210428-20220411/consensus.dir"
-OUTPUT_DIR="./outputs/testnet-$(basename $(dirname "${DATA_DIR}"))"
+OUTPUT_DIR="./outputs/mainnet-$(basename $(dirname "${DATA_DIR}"))"
 pre_run
 $SAMPLER_V3 consensus-blockstore-v3 $DATA_DIR/tendermint/data/blockstore.badger.db $OUTPUT_DIR/consensus-blockstore-v3.json > $OUTPUT_DIR/consensus-blockstore-v3.log 2>&1 || true
 $SAMPLER_V3 consensus-evidence-v3 $DATA_DIR/tendermint/data/evidence.badger.db $OUTPUT_DIR/consensus-evidence-v3.json > $OUTPUT_DIR/consensus-evidence-v3.log 2>&1 || true
@@ -53,7 +53,7 @@ post_run
 )
 (
 DATA_DIR="/snapshots/mainnet/20210428-20220411/cipher.dir"
-OUTPUT_DIR="./outputs/testnet-$(basename $(dirname "${DATA_DIR}"))"
+OUTPUT_DIR="./outputs/mainnet-$(basename $(dirname "${DATA_DIR}"))"
 pre_run
 $SAMPLER_V3 runtime-mkvs-v3 $DATA_DIR/runtimes/000000000000000000000000000000000000000000000000e199119c992377cb/mkvs_storage.badger.db $OUTPUT_DIR/cipher-runtime-mkvs-v3.json > $OUTPUT_DIR/cipher-runtime-mkvs-v3.log 2>&1 || true
 $SAMPLER_V3 runtime-history-v3 $DATA_DIR/runtimes/000000000000000000000000000000000000000000000000e199119c992377cb/history.db $OUTPUT_DIR/cipher-runtime-history-v3.json > $OUTPUT_DIR/cipher-runtime-history-v3.log 2>&1 || true
@@ -61,7 +61,7 @@ post_run
 )
 (
 DATA_DIR="/snapshots/mainnet/20210428-20220411/emerald.dir"
-OUTPUT_DIR="./outputs/testnet-$(basename $(dirname "${DATA_DIR}"))"
+OUTPUT_DIR="./outputs/mainnet-$(basename $(dirname "${DATA_DIR}"))"
 pre_run
 $SAMPLER_V3 runtime-history-v3 $DATA_DIR/runtimes/000000000000000000000000000000000000000000000000e2eaa99fc008f87f/history.db $OUTPUT_DIR/emerald-runtime-history-v3.json > $OUTPUT_DIR/emerald-runtime-history-v3.log 2>&1 || true
 $SAMPLER_V3 runtime-mkvs-v3 $DATA_DIR/runtimes/000000000000000000000000000000000000000000000000e2eaa99fc008f87f/mkvs_storage.badger.db $OUTPUT_DIR/emerald-runtime-mkvs-v3.json > $OUTPUT_DIR/emerald-runtime-mkvs-v3.log 2>&1 || true
@@ -71,7 +71,7 @@ post_run
 # mainnet-20220411-20231129 (BadgerDB v3)
 (
 DATA_DIR="/snapshots/mainnet/20220411-20231129/consensus.dir"
-OUTPUT_DIR="./outputs/testnet-$(basename $(dirname "${DATA_DIR}"))"
+OUTPUT_DIR="./outputs/mainnet-$(basename $(dirname "${DATA_DIR}"))"
 pre_run
 $SAMPLER_V3 consensus-blockstore-v3 $DATA_DIR/tendermint/data/blockstore.badger.db $OUTPUT_DIR/consensus-blockstore-v3.json > $OUTPUT_DIR/consensus-blockstore-v3.log 2>&1 || true
 $SAMPLER_V3 consensus-evidence-v3 $DATA_DIR/tendermint/data/evidence.badger.db $OUTPUT_DIR/consensus-evidence-v3.json > $OUTPUT_DIR/consensus-evidence-v3.log 2>&1 || true
@@ -81,7 +81,7 @@ post_run
 )
 (
 DATA_DIR="/snapshots/mainnet/20220411-20231129/cipher.dir"
-OUTPUT_DIR="./outputs/testnet-$(basename $(dirname "${DATA_DIR}"))"
+OUTPUT_DIR="./outputs/mainnet-$(basename $(dirname "${DATA_DIR}"))"
 pre_run
 $SAMPLER_V3 runtime-mkvs-v3 $DATA_DIR/runtimes/000000000000000000000000000000000000000000000000e199119c992377cb/mkvs_storage.badger.db $OUTPUT_DIR/cipher-runtime-mkvs-v3.json > $OUTPUT_DIR/cipher-runtime-mkvs-v3.log 2>&1 || true
 $SAMPLER_V3 runtime-history-v3 $DATA_DIR/runtimes/000000000000000000000000000000000000000000000000e199119c992377cb/history.db $OUTPUT_DIR/cipher-runtime-history-v3.json > $OUTPUT_DIR/cipher-runtime-history-v3.log 2>&1 || true
@@ -89,7 +89,7 @@ post_run
 )
 (
 DATA_DIR="/snapshots/mainnet/20220411-20231129/emerald.dir"
-OUTPUT_DIR="./outputs/testnet-$(basename $(dirname "${DATA_DIR}"))"
+OUTPUT_DIR="./outputs/mainnet-$(basename $(dirname "${DATA_DIR}"))"
 pre_run
 $SAMPLER_V3 runtime-mkvs-v3 $DATA_DIR/runtimes/000000000000000000000000000000000000000000000000e2eaa99fc008f87f/mkvs_storage.badger.db $OUTPUT_DIR/emerald-runtime-mkvs-v3.json > $OUTPUT_DIR/emerald-runtime-mkvs-v3.log 2>&1 || true
 $SAMPLER_V3 runtime-history-v3 $DATA_DIR/runtimes/000000000000000000000000000000000000000000000000e2eaa99fc008f87f/history.db $OUTPUT_DIR/emerald-runtime-history-v3.json > $OUTPUT_DIR/emerald-runtime-history-v3.log 2>&1 || true
@@ -97,7 +97,7 @@ post_run
 )
 (
 DATA_DIR="/snapshots/mainnet/20220411-20231129/sapphire.dir"
-OUTPUT_DIR="./outputs/testnet-$(basename $(dirname "${DATA_DIR}"))"
+OUTPUT_DIR="./outputs/mainnet-$(basename $(dirname "${DATA_DIR}"))"
 pre_run
 $SAMPLER_V3 runtime-mkvs-v3 $DATA_DIR/runtimes/000000000000000000000000000000000000000000000000f80306c9858e7279/mkvs_storage.badger.db $OUTPUT_DIR/sapphire-runtime-mkvs-v3.json > $OUTPUT_DIR/sapphire-runtime-mkvs-v3.log 2>&1 || true
 $SAMPLER_V3 runtime-history-v3 $DATA_DIR/runtimes/000000000000000000000000000000000000000000000000f80306c9858e7279/history.db $OUTPUT_DIR/sapphire-runtime-history-v3.json > $OUTPUT_DIR/sapphire-runtime-history-v3.log 2>&1 || true

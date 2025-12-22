@@ -2,6 +2,8 @@
 
 This **badgerdb-sampler** tool implements a comprehensive data extraction and decoding logic for BadgerDB databases used in Oasis node snapshots. This tool can extract and decode most data structures from consensus and runtime databases, even EVM data. It handles multiple BadgerDB versions (v2-v4) and data representations use by Oasis nodes (v20.x-v25.x). The decoding logic handles various data formats and reports decoding issues.
 
+**Warning:** For experimental purposes only. Decoded data might be incorrect.
+
 ## Features
 
 - **Multi-version BadgerDB Support**: Compatible with BadgerDB v2, v3, and v4
@@ -19,8 +21,8 @@ This **badgerdb-sampler** tool implements a comprehensive data extraction and de
 - `consensus-evidence` - Byzantine validator evidence
 - `consensus-mkvs` - Consensus state Merkle tree
 - `consensus-state` - Tendermint/CometBFT consensus state
-- `runtime-mkvs` - Runtime state Merkle tree (includes EVM storage)
 - `runtime-history` - Runtime block history with CBOR-encoded data (includes EVM events/transactions)
+- `runtime-mkvs` - Runtime state Merkle tree (includes EVM storage)
 
 ## Building
 
